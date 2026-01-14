@@ -1,0 +1,53 @@
+#Minecraft server properties
+# Copy this file to server.properties and customize as needed
+
+# Server basics
+server-port=25565
+motd=Raspberry Pi Minecraft Server
+max-players=10
+difficulty=normal
+gamemode=survival
+hardcore=false
+pvp=true
+
+# World settings
+level-name=world
+level-seed=
+level-type=minecraft\:normal
+generate-structures=true
+max-world-size=29999984
+spawn-protection=16
+
+# Performance settings (optimized for Raspberry Pi)
+view-distance=8
+simulation-distance=6
+network-compression-threshold=256
+max-tick-time=60000
+
+# RCON (Remote Console) - REQUIRED for Discord bot and auto-shutdown
+enable-rcon=true
+rcon.port=25575
+rcon.password=CHANGE_THIS_PASSWORD
+
+# Query
+enable-query=false
+query.port=25565
+
+# Online mode (set to true for authenticated servers)
+online-mode=false
+enforce-secure-profile=false
+
+# Other settings
+allow-flight=false
+allow-nether=true
+enable-command-block=false
+force-gamemode=false
+player-idle-timeout=0
+white-list=false
+enforce-whitelist=false
+spawn-animals=true
+spawn-monsters=true
+spawn-npcs=true
+enable-status=true
+broadcast-console-to-ops=true
+broadcast-rcon-to-ops=true

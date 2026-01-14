@@ -1,0 +1,21 @@
+[Unit]
+Description=Minecraft Server
+After=network.target
+
+[Service]
+Type=simple
+User=__USER__
+WorkingDirectory=__INSTALL_DIR__/server
+ExecStart=__INSTALL_DIR__/server/start.sh
+ExecStop=/bin/kill -SIGINT $MAINPID
+Restart=no
+
+# Give the server time to save and shutdown
+TimeoutStopSec=60
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

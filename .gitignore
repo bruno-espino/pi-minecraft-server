@@ -1,0 +1,61 @@
+# Environment and secrets
+.env
+*.env
+token.txt*
+credentials*
+
+# Minecraft server data (users should generate their own)
+server/world/
+server/world_nether/
+server/world_the_end/
+server/logs/
+server/crash-reports/
+server/usercache.json
+server/ops.json
+server/whitelist.json
+server/banned-ips.json
+server/banned-players.json
+server/*.jar
+server/libraries/
+server/versions/
+server/cache/
+server/server.properties
+server/eula.txt
+server/*.yml
+server/*.dat
+server/*.json
+server/version_history.json
+
+# Generated files from templates (keep templates, ignore generated)
+server/start.sh
+minecraft.service
+discord-bot/discord-bot.service
+mc-manager/minecraft-monitor.service
+
+# Plugin data and binaries (users should install their own)
+server/plugins/
+server/config/
+
+# State files
+mc-manager/server_state.txt
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+.venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
