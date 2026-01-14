@@ -189,23 +189,27 @@ pi-minecraft-server/
 
 ### Environment Variables
 
-All configuration is done via the `.env` file:
+The installer handles most configuration automatically. You only need to provide:
 
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `DISCORD_TOKEN` | Yes | - | Discord bot token |
-| `RCON_PASSWORD` | Yes | - | RCON password (must match server.properties) |
-| `NOTIFICATION_CHANNEL_ID` | No | - | Channel for shutdown alerts |
-| `RCON_HOST` | No | localhost | RCON host |
-| `RCON_PORT` | No | 25575 | RCON port |
-| `MINECRAFT_PORT` | No | 25565 | Minecraft Java port |
-| `BEDROCK_PORT` | No | 19132 | Minecraft Bedrock port |
-| `IDLE_TIMEOUT_MINUTES` | No | 30 | Minutes before auto-shutdown |
-| `CHECK_INTERVAL_SECONDS` | No | 60 | How often to check player count |
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `DISCORD_TOKEN` | Yes | Your Discord bot token |
+| `NOTIFICATION_CHANNEL_ID` | No | Channel ID for shutdown notifications |
 
-### JVM Optimization
+**Advanced settings** (have good defaults):
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `RCON_PASSWORD` | Auto-generated | Don't set this - installer generates it |
+| `RCON_HOST` | localhost | RCON connection host |
+| `RCON_PORT` | 25575 | RCON port |
+| `MINECRAFT_PORT` | 25565 | Minecraft Java port |
+| `BEDROCK_PORT` | 19132 | Minecraft Bedrock port |
+| `IDLE_TIMEOUT_MINUTES` | 30 | Minutes before auto-shutdown |
+| `CHECK_INTERVAL_SECONDS` | 60 | How often to check player count |
 
-The `server/start.sh` script uses [Aikar's optimized JVM flags](https://docs.papermc.io/paper/aikars-flags) tuned for 3.5GB allocation on Raspberry Pi 5:
+### JVM Settings
+
+Uses [Aikar's optimized flags](https://docs.papermc.io/paper/aikars-flags) with 3.5GB allocation (leaves ~4.5GB for OS and mods):
 
 ```bash
 java -Xms3584M -Xmx3584M \
@@ -215,7 +219,13 @@ java -Xms3584M -Xmx3584M \
   # ... and more
 ```
 
-Adjust `-Xms` and `-Xmx` in `server/start.sh.template` if you have different RAM available.
+**Why 3.5GB?** Leaves headroom for:
+- OS and background processes (~2GB)
+- Plugin overhead (Essentials, Geyser, etc.)
+- Chunk generation spikes
+- Multiple simultaneous players
+
+Adjust in `server/start.sh.template` if needed. Don't go above 6GB on an 8GB Pi.
 
 ## Service Management
 
