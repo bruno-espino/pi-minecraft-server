@@ -6,7 +6,7 @@ After=network.target
 User=__USER__
 WorkingDirectory=__INSTALL_DIR__/discord-bot
 EnvironmentFile=__INSTALL_DIR__/discord-bot/.env
-ExecStart=/usr/bin/python3 bot.py
+ExecStart=__INSTALL_DIR__/venv/bin/python bot.py
 Restart=on-failure
 RestartSec=10
 

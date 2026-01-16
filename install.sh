@@ -178,7 +178,8 @@ if [ -f "$INSTALL_DIR/.env" ]; then
     fi
 else
     if [ -f "$INSTALL_DIR/.env.example" ]; then
-        sed "s|change_this_password|$RCON_PASSWORD|g" "$INSTALL_DIR/.env.example" > "$INSTALL_DIR/.env"
+        # Copy template and set the RCON password
+        sed "s|^RCON_PASSWORD=.*|RCON_PASSWORD=$RCON_PASSWORD|" "$INSTALL_DIR/.env.example" > "$INSTALL_DIR/.env"
         echo -e "  ${GREEN}✓${NC} Created .env with secure password"
     fi
 fi
@@ -227,21 +228,61 @@ else
         fi
     else
         echo -e "  ${YELLOW}!${NC} Skipped - you'll need to set DISCORD_TOKEN in .env later"
-        echo "      ${BLUE}nano $INSTALL_DIR/.env${NC}"
+        echo -e "      ${BLUE}nano $INSTALL_DIR/.env${NC}"
     fi
 fi
 
 echo ""
 
-# Step 6: Install Python dependencies
+# Step 6: Install Python dependencies (using uv + virtual environment)
 
 echo -e "${BLUE}[6/7] Installing Python dependencies...${NC}"
 
-if pip3 install -q -r "$INSTALL_DIR/discord-bot/requirements.txt" 2>/dev/null || \
-   pip install -q -r "$INSTALL_DIR/discord-bot/requirements.txt" 2>/dev/null; then
-    echo -e "  ${GREEN}✓${NC} Python dependencies installed"
+VENV_DIR="$INSTALL_DIR/venv"
+
+# Check if uv is installed, offer to install if not
+if ! command -v uv &> /dev/null; then
+    echo -e "  ${YELLOW}!${NC} uv is not installed (fast Python package manager)"
+    read -p "  Install uv? (Y/n): " install_uv
+    if [[ ! "$install_uv" =~ ^[Nn]$ ]]; then
+        echo "  Installing uv..."
+        if curl -LsSf https://astral.sh/uv/install.sh | sh &>/dev/null; then
+            # Add to PATH for current session
+            export PATH="$HOME/.local/bin:$PATH"
+            echo -e "  ${GREEN}✓${NC} uv installed"
+        else
+            echo -e "  ${RED}✗${NC} Failed to install uv"
+            echo -e "      Try manually: ${BLUE}curl -LsSf https://astral.sh/uv/install.sh | sh${NC}"
+        fi
+    fi
+fi
+
+# Create venv and install dependencies with uv
+if command -v uv &> /dev/null; then
+    # Create venv if needed
+    if [ ! -d "$VENV_DIR" ]; then
+        if uv venv "$VENV_DIR" &>/dev/null; then
+            echo -e "  ${GREEN}✓${NC} Created virtual environment at venv/"
+        else
+            echo -e "  ${RED}✗${NC} Failed to create virtual environment"
+        fi
+    else
+        echo -e "  ${GREEN}✓${NC} Virtual environment already exists"
+    fi
+    
+    # Install dependencies
+    if [ -d "$VENV_DIR" ]; then
+        if uv pip install -q -p "$VENV_DIR" -r "$INSTALL_DIR/discord-bot/requirements.txt" 2>/dev/null; then
+            echo -e "  ${GREEN}✓${NC} Python dependencies installed in venv"
+        else
+            echo -e "  ${YELLOW}!${NC} Could not install dependencies"
+            echo -e "      Try: ${BLUE}uv pip install -p $VENV_DIR discord.py${NC}"
+        fi
+    fi
 else
-    echo -e "  ${YELLOW}!${NC} Could not install automatically. Run: pip install discord.py"
+    echo -e "  ${YELLOW}!${NC} uv not available - skipping Python dependencies"
+    echo -e "      Install uv: ${BLUE}curl -LsSf https://astral.sh/uv/install.sh | sh${NC}"
+    echo -e "      Then run: ${BLUE}uv venv venv && uv pip install -p venv discord.py${NC}"
 fi
 
 echo ""
@@ -293,15 +334,15 @@ echo "╚═══════════════════════�
 echo -e "${NC}"
 echo ""
 echo -e "${YELLOW}Verify your setup:${NC}"
-echo "  ${BLUE}./test.sh${NC}"
+echo -e "  ${BLUE}./test.sh${NC}"
 echo ""
 echo -e "${YELLOW}To start the server:${NC}"
-echo "  ${BLUE}sudo systemctl start minecraft${NC}"
-echo "  ${BLUE}sudo systemctl start discord-bot${NC}"
-echo "  ${BLUE}sudo systemctl start minecraft-monitor${NC}"
+echo -e "  ${BLUE}sudo systemctl start minecraft${NC}"
+echo -e "  ${BLUE}sudo systemctl start discord-bot${NC}"
+echo -e "  ${BLUE}sudo systemctl start minecraft-monitor${NC}"
 echo ""
 echo -e "${YELLOW}To view logs:${NC}"
-echo "  ${BLUE}sudo journalctl -u minecraft -f${NC}"
+echo -e "  ${BLUE}sudo journalctl -u minecraft -f${NC}"
 echo ""
 echo -e "${YELLOW}Discord commands:${NC}"
 echo "  !ip     - Get server IP address"

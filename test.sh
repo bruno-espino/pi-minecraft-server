@@ -188,11 +188,34 @@ else
     fail "Python 3 not found"
 fi
 
-if python3 -c "import discord" 2>/dev/null; then
-    DISCORD_PY_VERSION=$(python3 -c "import discord; print(discord.__version__)" 2>/dev/null)
-    pass "discord.py $DISCORD_PY_VERSION installed"
+# Check for uv (might be in ~/.local/bin which isn't always in PATH)
+UV_CMD=""
+if command -v uv &> /dev/null; then
+    UV_CMD="uv"
+elif [ -x "$HOME/.local/bin/uv" ]; then
+    UV_CMD="$HOME/.local/bin/uv"
+fi
+
+if [ -n "$UV_CMD" ]; then
+    UV_VERSION=$($UV_CMD --version 2>&1 | cut -d' ' -f2)
+    pass "uv $UV_VERSION installed"
 else
-    fail "discord.py not installed - run: pip install discord.py"
+    warn "uv not installed (run: curl -LsSf https://astral.sh/uv/install.sh | sh)"
+fi
+
+VENV_DIR="$INSTALL_DIR/venv"
+
+if [ -d "$VENV_DIR" ]; then
+    pass "Virtual environment exists at venv/"
+    
+    if "$VENV_DIR/bin/python" -c "import discord" 2>/dev/null; then
+        DISCORD_PY_VERSION=$("$VENV_DIR/bin/python" -c "import discord; print(discord.__version__)" 2>/dev/null)
+        pass "discord.py $DISCORD_PY_VERSION installed in venv"
+    else
+        fail "discord.py not installed in venv - run: uv pip install -p venv discord.py"
+    fi
+else
+    fail "Virtual environment not found - run ./install.sh"
 fi
 
 echo ""
