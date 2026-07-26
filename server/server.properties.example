@@ -2,7 +2,7 @@
 # Copy this file to server.properties and customize as needed
 
 # Server basics
-server-port=25565
+server-port=__MINECRAFT_PORT__
 motd=Raspberry Pi Minecraft Server
 max-players=10
 difficulty=normal
@@ -26,16 +26,16 @@ max-tick-time=60000
 
 # RCON (Remote Console) - REQUIRED for Discord bot and auto-shutdown
 enable-rcon=true
-rcon.port=25575
+rcon.port=__RCON_PORT__
 rcon.password=CHANGE_THIS_PASSWORD
 
 # Query
 enable-query=false
-query.port=25565
+query.port=__MINECRAFT_PORT__
 
-# Online mode (set to true for authenticated servers)
-online-mode=false
-enforce-secure-profile=false
+# Authenticate players with Mojang by default.
+online-mode=true
+enforce-secure-profile=true
 
 # Other settings
 allow-flight=false

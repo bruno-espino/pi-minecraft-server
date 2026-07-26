@@ -7,11 +7,11 @@ Type=simple
 User=__USER__
 WorkingDirectory=__INSTALL_DIR__/server
 ExecStart=__INSTALL_DIR__/server/start.sh
-ExecStop=/bin/kill -SIGINT $MAINPID
 Restart=no
+KillSignal=SIGINT
 
 # Give the server time to save and shutdown
-TimeoutStopSec=60
+TimeoutStopSec=90
 
 # Security hardening
 NoNewPrivileges=true

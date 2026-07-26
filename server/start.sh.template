@@ -2,11 +2,13 @@
 # Minecraft Server Start Script
 # Optimized for Raspberry Pi 5 with 8GB RAM
 
+set -e
+
 cd __INSTALL_DIR__/server
 
 # Allocate 3.5GB to Minecraft (leave headroom for OS, JVM overhead, and plugins)
 # Using Aikar's flags optimized for Paper MC
-java -Xms3584M -Xmx3584M \
+exec java -Xms__MEMORY_MB__M -Xmx__MEMORY_MB__M \
     -XX:+UseG1GC \
     -XX:+ParallelRefProcEnabled \
     -XX:MaxGCPauseMillis=200 \

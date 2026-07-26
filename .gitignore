@@ -28,9 +28,9 @@ server/version_history.json
 
 # Generated files from templates (keep templates, ignore generated)
 server/start.sh
-minecraft.service
-discord-bot/discord-bot.service
-mc-manager/minecraft-monitor.service
+minecraft*.service
+discord-bot/discord-bot*.service
+mc-manager/minecraft-monitor*.service
 
 # Plugin data and binaries (users should install their own)
 server/plugins/

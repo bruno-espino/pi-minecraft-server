@@ -1,351 +1,285 @@
 #!/bin/bash
-# Minecraft Server Installer for Raspberry Pi 5
+#
+# Install a Paper Minecraft server and its optional Discord/idle manager.
 
-set -e
+set -euo pipefail
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
-
-# Detect current user and installation directory
-INSTALL_USER="${SUDO_USER:-$USER}"
 INSTALL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+INSTALL_USER="${SUDO_USER:-$USER}"
+INSTANCE="main"
+MINECRAFT_VERSION="1.21.11"
+MINECRAFT_PORT=25565
+RCON_PORT=25575
+MEMORY_MB=3584
+WITH_DISCORD=true
+INSTALL_SERVICES=false
+START_SERVICES=false
+NON_INTERACTIVE=false
+DRY_RUN=false
+ACCEPT_EULA=false
 
-echo -e "${BLUE}"
-echo "╔═══════════════════════════════════════════════════════════════╗"
-echo "║       Minecraft Server for Raspberry Pi - Installer           ║"
-echo "╚═══════════════════════════════════════════════════════════════╝"
-echo -e "${NC}"
-echo ""
-echo -e "Install directory: ${GREEN}$INSTALL_DIR${NC}"
-echo -e "Running as user:   ${GREEN}$INSTALL_USER${NC}"
-echo ""
+usage() {
+    cat <<'EOF'
+Usage: ./install.sh [options]
 
-# Check if running with appropriate permissions
-if [ "$EUID" -ne 0 ]; then
-    echo -e "${YELLOW}Note: Some steps require sudo. You may be prompted for your password.${NC}"
-    echo ""
+Options:
+  --instance NAME           Instance name (default: main)
+  --minecraft-version VER  Paper/Minecraft version (default: 1.21.11)
+  --minecraft-port PORT     Java server port (default: 25565)
+  --rcon-port PORT          Local RCON port (default: 25575)
+  --memory MB               JVM memory in MiB (default: 3584)
+  --no-discord              Configure only Minecraft and the idle monitor
+  --install-services        Install and enable systemd units
+  --start                   Start installed services after installation
+  --accept-eula             Accept the Minecraft EULA non-interactively
+  --non-interactive         Never prompt; fail when required input is missing
+  --dry-run                 Validate and print the plan without changing files
+  -h, --help                Show this help
+
+DISCORD_TOKEN and NOTIFICATION_CHANNEL_ID can be supplied as environment
+variables. Secrets are stored in .env with mode 600.
+EOF
+}
+
+fail() {
+    echo "Error: $*" >&2
+    exit 1
+}
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --instance) INSTANCE="${2:?missing instance}"; shift 2 ;;
+        --minecraft-version) MINECRAFT_VERSION="${2:?missing version}"; shift 2 ;;
+        --minecraft-port) MINECRAFT_PORT="${2:?missing port}"; shift 2 ;;
+        --rcon-port) RCON_PORT="${2:?missing port}"; shift 2 ;;
+        --memory) MEMORY_MB="${2:?missing memory}"; shift 2 ;;
+        --no-discord) WITH_DISCORD=false; shift ;;
+        --install-services) INSTALL_SERVICES=true; shift ;;
+        --start) START_SERVICES=true; INSTALL_SERVICES=true; shift ;;
+        --accept-eula) ACCEPT_EULA=true; shift ;;
+        --non-interactive) NON_INTERACTIVE=true; shift ;;
+        --dry-run) DRY_RUN=true; shift ;;
+        -h|--help) usage; exit 0 ;;
+        *) fail "unknown option: $1" ;;
+    esac
+done
+
+[[ "$INSTANCE" =~ ^[a-z0-9][a-z0-9-]*$ ]] || fail "instance must use lowercase letters, numbers, and hyphens"
+[[ "$MINECRAFT_PORT" =~ ^[0-9]+$ ]] && (( MINECRAFT_PORT >= 1024 && MINECRAFT_PORT <= 65535 )) || fail "invalid Minecraft port"
+[[ "$RCON_PORT" =~ ^[0-9]+$ ]] && (( RCON_PORT >= 1024 && RCON_PORT <= 65535 )) || fail "invalid RCON port"
+[[ "$MEMORY_MB" =~ ^[0-9]+$ ]] && (( MEMORY_MB >= 768 )) || fail "memory must be at least 768 MiB"
+(( MINECRAFT_PORT != RCON_PORT )) || fail "Minecraft and RCON ports must differ"
+
+if [ "$INSTANCE" = "main" ]; then
+    MC_SERVICE="minecraft"
+    BOT_SERVICE="discord-bot"
+    MONITOR_SERVICE="minecraft-monitor"
+    UNIT_SUFFIX=""
+else
+    MC_SERVICE="minecraft-$INSTANCE"
+    BOT_SERVICE="discord-bot-$INSTANCE"
+    MONITOR_SERVICE="minecraft-monitor-$INSTANCE"
+    UNIT_SUFFIX="-$INSTANCE"
 fi
 
-# Helper functions
+echo "Installation plan"
+echo "  Directory:         $INSTALL_DIR"
+echo "  Instance:          $INSTANCE"
+echo "  Minecraft/Paper:   $MINECRAFT_VERSION"
+echo "  Minecraft port:    $MINECRAFT_PORT"
+echo "  RCON port:         $RCON_PORT"
+echo "  JVM memory:        ${MEMORY_MB} MiB"
+echo "  Discord bot:       $WITH_DISCORD"
+echo "  Install services:  $INSTALL_SERVICES"
+echo "  Service names:     $MC_SERVICE, $MONITOR_SERVICE"
+[ "$WITH_DISCORD" = true ] && echo "                     $BOT_SERVICE"
 
-generate_password() {
-    # Generate a random 16-character alphanumeric password
-    # Works on systems without openssl by falling back to /dev/urandom
-    if command -v openssl &> /dev/null; then
-        openssl rand -base64 12 | tr -dc 'a-zA-Z0-9' | head -c 16
+if [ "$DRY_RUN" = true ]; then
+    echo "Dry run complete; no files changed."
+    exit 0
+fi
+
+command -v python3 >/dev/null || fail "Python 3 is required"
+command -v java >/dev/null || fail "Java 21 is required; install it before running this installer"
+JAVA_MAJOR=$(java -version 2>&1 | head -1 | cut -d'"' -f2 | cut -d'.' -f1)
+[[ "$JAVA_MAJOR" =~ ^[0-9]+$ ]] && (( JAVA_MAJOR >= 21 )) || fail "Java 21 or newer is required"
+
+if [ "$ACCEPT_EULA" != true ]; then
+    [ "$NON_INTERACTIVE" = false ] || fail "pass --accept-eula after reviewing https://aka.ms/MinecraftEULA"
+    read -r -p "Accept the Minecraft EULA (https://aka.ms/MinecraftEULA)? [y/N] " answer
+    [[ "$answer" =~ ^[Yy]$ ]] || fail "EULA not accepted"
+fi
+
+get_env_value() {
+    local key="$1"
+    [ -f "$INSTALL_DIR/.env" ] || return 0
+    sed -n "s/^${key}=//p" "$INSTALL_DIR/.env" | tail -1
+}
+
+RCON_PASSWORD="${RCON_PASSWORD:-$(get_env_value RCON_PASSWORD)}"
+if [ -z "$RCON_PASSWORD" ]; then
+    RCON_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')
+fi
+
+DISCORD_TOKEN="${DISCORD_TOKEN:-$(get_env_value DISCORD_TOKEN)}"
+NOTIFICATION_CHANNEL_ID="${NOTIFICATION_CHANNEL_ID:-$(get_env_value NOTIFICATION_CHANNEL_ID)}"
+IDLE_TIMEOUT_MINUTES="${IDLE_TIMEOUT_MINUTES:-$(get_env_value IDLE_TIMEOUT_MINUTES)}"
+CHECK_INTERVAL_SECONDS="${CHECK_INTERVAL_SECONDS:-$(get_env_value CHECK_INTERVAL_SECONDS)}"
+IDLE_TIMEOUT_MINUTES="${IDLE_TIMEOUT_MINUTES:-30}"
+CHECK_INTERVAL_SECONDS="${CHECK_INTERVAL_SECONDS:-60}"
+
+if [ "$WITH_DISCORD" = true ] && [ -z "$DISCORD_TOKEN" ]; then
+    if [ "$NON_INTERACTIVE" = true ]; then
+        fail "DISCORD_TOKEN is required unless --no-discord is used"
+    fi
+    read -r -s -p "Discord bot token: " DISCORD_TOKEN
+    echo
+    [ -n "$DISCORD_TOKEN" ] || fail "Discord token cannot be empty; use --no-discord to skip it"
+fi
+
+umask 077
+cat > "$INSTALL_DIR/.env" <<EOF
+DISCORD_TOKEN=$DISCORD_TOKEN
+NOTIFICATION_CHANNEL_ID=$NOTIFICATION_CHANNEL_ID
+RCON_PASSWORD=$RCON_PASSWORD
+RCON_HOST=localhost
+RCON_PORT=$RCON_PORT
+MINECRAFT_PORT=$MINECRAFT_PORT
+MINECRAFT_SERVICE=$MC_SERVICE
+IDLE_TIMEOUT_MINUTES=$IDLE_TIMEOUT_MINUTES
+CHECK_INTERVAL_SECONDS=$CHECK_INTERVAL_SECONDS
+STATE_FILE=$INSTALL_DIR/mc-manager/server_state.txt
+EOF
+chmod 600 "$INSTALL_DIR/.env"
+umask 022
+
+mkdir -p "$INSTALL_DIR/server"
+
+set_property() {
+    local file="$1"
+    local key="$2"
+    local value="$3"
+    if grep -q "^${key}=" "$file"; then
+        sed -i "s|^${key}=.*|${key}=${value}|" "$file"
     else
-        tr -dc 'a-zA-Z0-9' < /dev/urandom | head -c 16
+        printf '%s=%s\n' "$key" "$value" >> "$file"
     fi
 }
 
-generate_from_template() {
+if [ ! -f "$INSTALL_DIR/server/server.properties" ]; then
+    sed \
+        -e "s|__MINECRAFT_PORT__|$MINECRAFT_PORT|g" \
+        -e "s|__RCON_PORT__|$RCON_PORT|g" \
+        -e "s|CHANGE_THIS_PASSWORD|$RCON_PASSWORD|g" \
+        "$INSTALL_DIR/server/server.properties.example" \
+        > "$INSTALL_DIR/server/server.properties"
+else
+    set_property "$INSTALL_DIR/server/server.properties" server-port "$MINECRAFT_PORT"
+    set_property "$INSTALL_DIR/server/server.properties" query.port "$MINECRAFT_PORT"
+    set_property "$INSTALL_DIR/server/server.properties" rcon.port "$RCON_PORT"
+    set_property "$INSTALL_DIR/server/server.properties" rcon.password "$RCON_PASSWORD"
+fi
+echo "eula=true" > "$INSTALL_DIR/server/eula.txt"
+
+sed \
+    -e "s|__INSTALL_DIR__|$INSTALL_DIR|g" \
+    -e "s|__MEMORY_MB__|$MEMORY_MB|g" \
+    "$INSTALL_DIR/server/start.sh.template" \
+    > "$INSTALL_DIR/server/start.sh"
+chmod 755 "$INSTALL_DIR/server/start.sh"
+
+render_unit() {
     local template="$1"
     local output="$2"
-    
-    if [ ! -f "$template" ]; then
-        echo -e "${RED}Error: Template not found: $template${NC}"
-        return 1
-    fi
-    
-    sed -e "s|__USER__|$INSTALL_USER|g" \
+    sed \
+        -e "s|__USER__|$INSTALL_USER|g" \
         -e "s|__INSTALL_DIR__|$INSTALL_DIR|g" \
         "$template" > "$output"
-    
-    echo -e "  ${GREEN}✓${NC} Generated: $output"
 }
 
-# Step 1: Generate config files from templates
+MC_UNIT="$INSTALL_DIR/minecraft${UNIT_SUFFIX}.service"
+BOT_UNIT="$INSTALL_DIR/discord-bot/discord-bot${UNIT_SUFFIX}.service"
+MONITOR_UNIT="$INSTALL_DIR/mc-manager/minecraft-monitor${UNIT_SUFFIX}.service"
+render_unit "$INSTALL_DIR/minecraft.service.template" "$MC_UNIT"
+render_unit "$INSTALL_DIR/discord-bot/discord-bot.service.template" "$BOT_UNIT"
+render_unit "$INSTALL_DIR/mc-manager/minecraft-monitor.service.template" "$MONITOR_UNIT"
 
-echo -e "${BLUE}[1/7] Generating configuration files from templates...${NC}"
+if [ ! -f "$INSTALL_DIR/server/server.jar" ]; then
+    echo "Downloading the latest stable Paper build for $MINECRAFT_VERSION..."
+    python3 - "$MINECRAFT_VERSION" "$INSTALL_DIR/server/server.jar" <<'PY'
+import hashlib
+import json
+from pathlib import Path
+import shutil
+import sys
+import urllib.request
 
-# Generate start.sh
-generate_from_template "$INSTALL_DIR/server/start.sh.template" "$INSTALL_DIR/server/start.sh"
-chmod +x "$INSTALL_DIR/server/start.sh"
-
-# Generate service files
-generate_from_template "$INSTALL_DIR/minecraft.service.template" "$INSTALL_DIR/minecraft.service"
-generate_from_template "$INSTALL_DIR/discord-bot/discord-bot.service.template" "$INSTALL_DIR/discord-bot/discord-bot.service"
-generate_from_template "$INSTALL_DIR/mc-manager/minecraft-monitor.service.template" "$INSTALL_DIR/mc-manager/minecraft-monitor.service"
-
-echo ""
-
-# Step 2: Check/Install Java 21
-
-echo -e "${BLUE}[2/7] Checking Java installation...${NC}"
-
-if command -v java &> /dev/null; then
-    JAVA_VERSION=$(java -version 2>&1 | head -1 | cut -d'"' -f2 | cut -d'.' -f1)
-    if [ "$JAVA_VERSION" -ge 21 ] 2>/dev/null; then
-        echo -e "  ${GREEN}✓${NC} Java $JAVA_VERSION is already installed"
-    else
-        echo -e "  ${YELLOW}!${NC} Java $JAVA_VERSION found, but Java 21+ is recommended"
-        read -p "  Install Java 21? (y/N): " install_java
-        if [[ "$install_java" =~ ^[Yy]$ ]]; then
-            echo "  Installing Java 21..."
-            sudo apt install -y wget apt-transport-https gpg
-            wget -qO - https://packages.adoptium.net/artifactory/api/gpg/key/public | sudo gpg --dearmor -o /etc/apt/keyrings/adoptium.gpg 2>/dev/null || true
-            echo "deb [signed-by=/etc/apt/keyrings/adoptium.gpg] https://packages.adoptium.net/artifactory/deb $(awk -F= '/^VERSION_CODENAME/{print$2}' /etc/os-release) main" | sudo tee /etc/apt/sources.list.d/adoptium.list > /dev/null
-            sudo apt update
-            sudo apt install -y temurin-21-jre
-            echo -e "  ${GREEN}✓${NC} Java 21 installed"
-        fi
-    fi
-else
-    echo -e "  ${YELLOW}!${NC} Java not found"
-    read -p "  Install Java 21? (y/N): " install_java
-    if [[ "$install_java" =~ ^[Yy]$ ]]; then
-        echo "  Installing Java 21..."
-        sudo apt install -y wget apt-transport-https gpg
-        wget -qO - https://packages.adoptium.net/artifactory/api/gpg/key/public | sudo gpg --dearmor -o /etc/apt/keyrings/adoptium.gpg 2>/dev/null || true
-        echo "deb [signed-by=/etc/apt/keyrings/adoptium.gpg] https://packages.adoptium.net/artifactory/deb $(awk -F= '/^VERSION_CODENAME/{print$2}' /etc/os-release) main" | sudo tee /etc/apt/sources.list.d/adoptium.list > /dev/null
-        sudo apt update
-        sudo apt install -y temurin-21-jre
-        echo -e "  ${GREEN}✓${NC} Java 21 installed"
-    else
-        echo -e "  ${RED}Warning: Java is required to run the Minecraft server${NC}"
-    fi
+version, target_name = sys.argv[1:]
+user_agent = "pi-minecraft-server/1.0 (https://github.com/bruno-espino/pi-minecraft-server)"
+api_url = f"https://fill.papermc.io/v3/projects/paper/versions/{version}/builds"
+request = urllib.request.Request(api_url, headers={"User-Agent": user_agent})
+with urllib.request.urlopen(request, timeout=30) as response:
+    builds = json.load(response)
+stable = next((build for build in builds if build.get("channel") == "STABLE"), None)
+if not stable:
+    raise SystemExit(f"No stable Paper build found for {version}")
+download = stable["downloads"]["server:default"]
+target = Path(target_name)
+partial = target.with_suffix(".jar.part")
+request = urllib.request.Request(download["url"], headers={"User-Agent": user_agent})
+with urllib.request.urlopen(request, timeout=120) as response, partial.open("wb") as output:
+    shutil.copyfileobj(response, output)
+expected = download.get("checksums", {}).get("sha256")
+if expected:
+    actual = hashlib.sha256(partial.read_bytes()).hexdigest()
+    if actual != expected:
+        partial.unlink(missing_ok=True)
+        raise SystemExit("Paper download checksum mismatch")
+partial.replace(target)
+print(f"Downloaded {download['name']}")
+PY
 fi
 
-echo ""
-
-# Step 3: Download Paper MC (if needed)
-
-echo -e "${BLUE}[3/7] Checking Minecraft server...${NC}"
-
-if [ -f "$INSTALL_DIR/server/server.jar" ]; then
-    echo -e "  ${GREEN}✓${NC} server.jar already exists"
-else
-    read -p "  Download Paper MC 1.21.4? (y/N): " download_paper
-    if [[ "$download_paper" =~ ^[Yy]$ ]]; then
-        echo "  Downloading Paper MC..."
-        PAPER_URL="https://api.papermc.io/v2/projects/paper/versions/1.21.4/builds/224/downloads/paper-1.21.4-224.jar"
-        wget -q --show-progress -O "$INSTALL_DIR/server/server.jar" "$PAPER_URL"
-        echo -e "  ${GREEN}✓${NC} Paper MC downloaded"
-        
-        # Accept EULA
-        echo "eula=true" > "$INSTALL_DIR/server/eula.txt"
-        echo -e "  ${GREEN}✓${NC} EULA accepted"
-    fi
+if [ ! -x "$INSTALL_DIR/venv/bin/python" ]; then
+    python3 -m venv "$INSTALL_DIR/venv" ||
+        fail "could not create venv; install the python3-venv OS package"
+fi
+if [ "$WITH_DISCORD" = true ]; then
+    "$INSTALL_DIR/venv/bin/python" -m pip install -q -r "$INSTALL_DIR/discord-bot/requirements.txt"
 fi
 
-echo ""
-
-# Step 4: Setup RCON password and config files
-
-echo -e "${BLUE}[4/7] Setting up configuration files...${NC}"
-
-# Generate RCON password if needed (used for both .env and server.properties)
-RCON_PASSWORD=""
-GENERATED_NEW_PASSWORD=false
-
-if [ -f "$INSTALL_DIR/.env" ]; then
-    # Extract existing password from .env
-    RCON_PASSWORD=$(grep -E "^RCON_PASSWORD=" "$INSTALL_DIR/.env" 2>/dev/null | cut -d'=' -f2)
-fi
-
-if [ -z "$RCON_PASSWORD" ] || [ "$RCON_PASSWORD" = "change_this_password" ]; then
-    RCON_PASSWORD=$(generate_password)
-    GENERATED_NEW_PASSWORD=true
-    echo -e "  ${GREEN}✓${NC} Generated secure RCON password"
-fi
-
-# Setup server.properties
-if [ -f "$INSTALL_DIR/server/server.properties" ]; then
-    echo -e "  ${GREEN}✓${NC} server.properties already exists"
-    # Update RCON password if we generated a new one
-    if [ "$GENERATED_NEW_PASSWORD" = true ]; then
-        sed -i "s|^rcon.password=.*|rcon.password=$RCON_PASSWORD|" "$INSTALL_DIR/server/server.properties"
-        echo -e "  ${GREEN}✓${NC} Updated RCON password in server.properties"
+if [ "$INSTALL_SERVICES" = true ]; then
+    if [ "$NON_INTERACTIVE" = false ]; then
+        read -r -p "Install and enable the listed systemd services? [y/N] " answer
+        [[ "$answer" =~ ^[Yy]$ ]] || fail "service installation cancelled"
     fi
-else
-    if [ -f "$INSTALL_DIR/server/server.properties.example" ]; then
-        sed "s|CHANGE_THIS_PASSWORD|$RCON_PASSWORD|g" "$INSTALL_DIR/server/server.properties.example" > "$INSTALL_DIR/server/server.properties"
-        echo -e "  ${GREEN}✓${NC} Created server.properties with secure password"
+
+    sudo install -m 644 "$MC_UNIT" "/etc/systemd/system/$MC_SERVICE.service"
+    sudo install -m 644 "$MONITOR_UNIT" "/etc/systemd/system/$MONITOR_SERVICE.service"
+    if [ "$WITH_DISCORD" = true ]; then
+        sudo install -m 644 "$BOT_UNIT" "/etc/systemd/system/$BOT_SERVICE.service"
     fi
-fi
 
-# Setup .env file
-if [ -f "$INSTALL_DIR/.env" ]; then
-    echo -e "  ${GREEN}✓${NC} .env already exists"
-    # Update RCON password if we generated a new one
-    if [ "$GENERATED_NEW_PASSWORD" = true ]; then
-        sed -i "s|^RCON_PASSWORD=.*|RCON_PASSWORD=$RCON_PASSWORD|" "$INSTALL_DIR/.env"
-        echo -e "  ${GREEN}✓${NC} Updated RCON password in .env"
-    fi
-else
-    if [ -f "$INSTALL_DIR/.env.example" ]; then
-        # Copy template and set the RCON password
-        sed "s|^RCON_PASSWORD=.*|RCON_PASSWORD=$RCON_PASSWORD|" "$INSTALL_DIR/.env.example" > "$INSTALL_DIR/.env"
-        echo -e "  ${GREEN}✓${NC} Created .env with secure password"
-    fi
-fi
-
-# Update STATE_FILE path in .env to use install directory
-if [ -f "$INSTALL_DIR/.env" ]; then
-    sed -i "s|^STATE_FILE=.*|STATE_FILE=$INSTALL_DIR/mc-manager/server_state.txt|" "$INSTALL_DIR/.env"
-fi
-
-echo ""
-
-# Step 5: Configure Discord token
-
-echo -e "${BLUE}[5/7] Configuring Discord bot...${NC}"
-
-# Check if token already set
-EXISTING_TOKEN=$(grep -E "^DISCORD_TOKEN=" "$INSTALL_DIR/.env" 2>/dev/null | cut -d'=' -f2)
-
-if [ -n "$EXISTING_TOKEN" ] && [ "$EXISTING_TOKEN" != "your_discord_bot_token_here" ]; then
-    echo -e "  ${GREEN}✓${NC} Discord token already configured"
-else
-    echo ""
-    echo -e "  ${YELLOW}To use the Discord bot, you need a bot token.${NC}"
-    echo ""
-    echo "  If you don't have one yet:"
-    echo "    1. Go to https://discord.com/developers/applications"
-    echo "    2. Create a new application"
-    echo "    3. Go to 'Bot' section and click 'Reset Token'"
-    echo "    4. Copy the token"
-    echo ""
-    read -p "  Enter your Discord bot token (or press Enter to skip): " DISCORD_TOKEN
-    
-    if [ -n "$DISCORD_TOKEN" ]; then
-        # Basic validation - Discord tokens are typically 70+ characters
-        if [ ${#DISCORD_TOKEN} -lt 50 ]; then
-            echo -e "  ${YELLOW}!${NC} Warning: Token seems short (expected 70+ characters)"
-            read -p "  Use this token anyway? (y/N): " use_anyway
-            if [[ ! "$use_anyway" =~ ^[Yy]$ ]]; then
-                DISCORD_TOKEN=""
-            fi
-        fi
-        
-        if [ -n "$DISCORD_TOKEN" ]; then
-            sed -i "s|^DISCORD_TOKEN=.*|DISCORD_TOKEN=$DISCORD_TOKEN|" "$INSTALL_DIR/.env"
-            echo -e "  ${GREEN}✓${NC} Discord token saved to .env"
-        fi
-    else
-        echo -e "  ${YELLOW}!${NC} Skipped - you'll need to set DISCORD_TOKEN in .env later"
-        echo -e "      ${BLUE}nano $INSTALL_DIR/.env${NC}"
-    fi
-fi
-
-echo ""
-
-# Step 6: Install Python dependencies (using uv + virtual environment)
-
-echo -e "${BLUE}[6/7] Installing Python dependencies...${NC}"
-
-VENV_DIR="$INSTALL_DIR/venv"
-
-# Check if uv is installed, offer to install if not
-if ! command -v uv &> /dev/null; then
-    echo -e "  ${YELLOW}!${NC} uv is not installed (fast Python package manager)"
-    read -p "  Install uv? (Y/n): " install_uv
-    if [[ ! "$install_uv" =~ ^[Nn]$ ]]; then
-        echo "  Installing uv..."
-        if curl -LsSf https://astral.sh/uv/install.sh | sh &>/dev/null; then
-            # Add to PATH for current session
-            export PATH="$HOME/.local/bin:$PATH"
-            echo -e "  ${GREEN}✓${NC} uv installed"
-        else
-            echo -e "  ${RED}✗${NC} Failed to install uv"
-            echo -e "      Try manually: ${BLUE}curl -LsSf https://astral.sh/uv/install.sh | sh${NC}"
-        fi
-    fi
-fi
-
-# Create venv and install dependencies with uv
-if command -v uv &> /dev/null; then
-    # Create venv if needed
-    if [ ! -d "$VENV_DIR" ]; then
-        if uv venv "$VENV_DIR" &>/dev/null; then
-            echo -e "  ${GREEN}✓${NC} Created virtual environment at venv/"
-        else
-            echo -e "  ${RED}✗${NC} Failed to create virtual environment"
-        fi
-    else
-        echo -e "  ${GREEN}✓${NC} Virtual environment already exists"
-    fi
-    
-    # Install dependencies
-    if [ -d "$VENV_DIR" ]; then
-        if uv pip install -q -p "$VENV_DIR" -r "$INSTALL_DIR/discord-bot/requirements.txt" 2>/dev/null; then
-            echo -e "  ${GREEN}✓${NC} Python dependencies installed in venv"
-        else
-            echo -e "  ${YELLOW}!${NC} Could not install dependencies"
-            echo -e "      Try: ${BLUE}uv pip install -p $VENV_DIR discord.py${NC}"
-        fi
-    fi
-else
-    echo -e "  ${YELLOW}!${NC} uv not available - skipping Python dependencies"
-    echo -e "      Install uv: ${BLUE}curl -LsSf https://astral.sh/uv/install.sh | sh${NC}"
-    echo -e "      Then run: ${BLUE}uv venv venv && uv pip install -p venv discord.py${NC}"
-fi
-
-echo ""
-
-# Step 7: Install systemd services
-
-echo -e "${BLUE}[7/7] Installing systemd services...${NC}"
-
-read -p "  Install systemd services? (y/N): " install_services
-if [[ "$install_services" =~ ^[Yy]$ ]]; then
-    # Copy service files
-    sudo cp "$INSTALL_DIR/minecraft.service" /etc/systemd/system/
-    sudo cp "$INSTALL_DIR/discord-bot/discord-bot.service" /etc/systemd/system/
-    sudo cp "$INSTALL_DIR/mc-manager/minecraft-monitor.service" /etc/systemd/system/
-    echo -e "  ${GREEN}✓${NC} Service files installed"
-    
-    # Setup sudoers for passwordless minecraft control
-    SUDOERS_FILE="/etc/sudoers.d/minecraft"
-    sudo tee "$SUDOERS_FILE" > /dev/null << EOF
-# Allow $INSTALL_USER to control minecraft service without password
-# Required for Discord bot to start/stop the server
-$INSTALL_USER ALL=(ALL) NOPASSWD: /usr/bin/systemctl start minecraft
-$INSTALL_USER ALL=(ALL) NOPASSWD: /usr/bin/systemctl stop minecraft
-$INSTALL_USER ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart minecraft
-$INSTALL_USER ALL=(ALL) NOPASSWD: /usr/bin/systemctl status minecraft
+    sudoers_tmp=$(mktemp)
+    cat > "$sudoers_tmp" <<EOF
+$INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/systemctl start $MC_SERVICE
+$INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/systemctl stop $MC_SERVICE
+$INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/systemctl restart $MC_SERVICE
+$INSTALL_USER ALL=(root) NOPASSWD: /usr/bin/systemctl status $MC_SERVICE
 EOF
-    sudo chmod 440 "$SUDOERS_FILE"
-    echo -e "  ${GREEN}✓${NC} Sudo permissions configured"
-    
-    # Reload systemd
+    sudo visudo -cf "$sudoers_tmp" >/dev/null
+    sudo install -m 440 "$sudoers_tmp" "/etc/sudoers.d/minecraft-$INSTANCE"
+    find "$sudoers_tmp" -delete
+
     sudo systemctl daemon-reload
-    echo -e "  ${GREEN}✓${NC} systemd reloaded"
-    
-    # Enable services
-    sudo systemctl enable minecraft
-    sudo systemctl enable discord-bot
-    sudo systemctl enable minecraft-monitor
-    echo -e "  ${GREEN}✓${NC} Services enabled for auto-start"
+    sudo systemctl enable "$MC_SERVICE" "$MONITOR_SERVICE"
+    [ "$WITH_DISCORD" = false ] || sudo systemctl enable "$BOT_SERVICE"
+
+    if [ "$START_SERVICES" = true ]; then
+        sudo systemctl start "$MC_SERVICE" "$MONITOR_SERVICE"
+        [ "$WITH_DISCORD" = false ] || sudo systemctl start "$BOT_SERVICE"
+    fi
 fi
 
-echo ""
-
-# Done!
-
-echo -e "${GREEN}"
-echo "╔═══════════════════════════════════════════════════════════════╗"
-echo "║                    Installation Complete!                      ║"
-echo "╚═══════════════════════════════════════════════════════════════╝"
-echo -e "${NC}"
-echo ""
-echo -e "${YELLOW}Verify your setup:${NC}"
-echo -e "  ${BLUE}./test.sh${NC}"
-echo ""
-echo -e "${YELLOW}To start the server:${NC}"
-echo -e "  ${BLUE}sudo systemctl start minecraft${NC}"
-echo -e "  ${BLUE}sudo systemctl start discord-bot${NC}"
-echo -e "  ${BLUE}sudo systemctl start minecraft-monitor${NC}"
-echo ""
-echo -e "${YELLOW}To view logs:${NC}"
-echo -e "  ${BLUE}sudo journalctl -u minecraft -f${NC}"
-echo ""
-echo -e "${YELLOW}Discord commands:${NC}"
-echo "  !ip     - Get server IP address"
-echo "  !status - Check server status"
-echo "  !up     - Start the server"
-echo ""
+echo "Installation complete."
+echo "Run ./test.sh to validate the generated configuration."

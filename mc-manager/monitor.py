@@ -22,9 +22,11 @@ RCON_PORT = int(os.environ.get('RCON_PORT', 25575))
 RCON_PASSWORD = os.environ.get('RCON_PASSWORD')
 IDLE_TIMEOUT_MINUTES = int(os.environ.get('IDLE_TIMEOUT_MINUTES', 30))
 CHECK_INTERVAL_SECONDS = int(os.environ.get('CHECK_INTERVAL_SECONDS', 60))
+MINECRAFT_SERVICE = os.environ.get('MINECRAFT_SERVICE', 'minecraft')
 
 # State file to communicate with Discord bot
-STATE_FILE = os.environ.get('STATE_FILE', '/opt/minecraft/mc-manager/server_state.txt')
+DEFAULT_STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'server_state.txt')
+STATE_FILE = os.environ.get('STATE_FILE', DEFAULT_STATE_FILE)
 
 
 def get_player_count():
@@ -54,14 +56,14 @@ def get_player_count():
 
 
 def is_server_running():
-    """Check if the Minecraft server process is running."""
+    """Check whether the configured Minecraft systemd unit is active."""
     try:
         result = subprocess.run(
-            ["pgrep", "-f", "server.jar"],
+            ["systemctl", "is-active", MINECRAFT_SERVICE],
             capture_output=True,
             text=True
         )
-        return result.returncode == 0
+        return result.returncode == 0 and result.stdout.strip() == "active"
     except Exception:
         return False
 
@@ -87,10 +89,17 @@ def stop_server():
                 return True
             time.sleep(1)
         
-        print(f"[{datetime.now()}] Server did not stop gracefully, forcing...")
-        subprocess.run(["pkill", "-f", "server.jar"])
-        update_state("stopped_idle")
-        return True
+        print(f"[{datetime.now()}] Server did not stop gracefully; asking systemd to stop it...")
+        result = subprocess.run(
+            ["sudo", "systemctl", "stop", MINECRAFT_SERVICE],
+            capture_output=True,
+            text=True
+        )
+        if result.returncode == 0:
+            update_state("stopped_idle")
+            return True
+        print(f"[{datetime.now()}] systemd stop failed: {result.stderr.strip()}")
+        return False
         
     except Exception as e:
         print(f"[{datetime.now()}] Error stopping server: {e}")

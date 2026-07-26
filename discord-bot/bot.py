@@ -24,15 +24,28 @@ from shared import RCONClient, strip_color_codes
 TOKEN = os.environ.get('DISCORD_TOKEN')
 NOTIFICATION_CHANNEL_ID = os.environ.get('NOTIFICATION_CHANNEL_ID')
 MINECRAFT_PORT = int(os.environ.get('MINECRAFT_PORT', 25565))
-BEDROCK_PORT = int(os.environ.get('BEDROCK_PORT', 19132))
+MINECRAFT_SERVICE = os.environ.get('MINECRAFT_SERVICE', 'minecraft')
 RCON_HOST = os.environ.get('RCON_HOST', 'localhost')
 RCON_PORT = int(os.environ.get('RCON_PORT', 25575))
 RCON_PASSWORD = os.environ.get('RCON_PASSWORD')
-STATE_FILE = os.environ.get('STATE_FILE', '/opt/minecraft/mc-manager/server_state.txt')
+DEFAULT_STATE_FILE = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    'mc-manager',
+    'server_state.txt'
+)
+STATE_FILE = os.environ.get('STATE_FILE', DEFAULT_STATE_FILE)
+IDLE_TIMEOUT_MINUTES = int(os.environ.get('IDLE_TIMEOUT_MINUTES', 30))
 
 intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix='!', intents=intents)
+
+
+def get_public_address():
+    """Return the public Java server address."""
+    with urllib.request.urlopen('https://api.ipify.org', timeout=10) as response:
+        public_ip = response.read().decode('utf-8')
+    return f"`{public_ip}:{MINECRAFT_PORT}`"
 
 
 def get_player_info():
@@ -121,7 +134,7 @@ async def monitor_shutdown():
         if current_state == 'stopped_idle' and not notified_shutdown:
             if hasattr(channel, 'send'):
                 await channel.send(
-                    "**Server shut down** due to 30 minutes of inactivity.\n"
+                    f"**Server shut down** due to {IDLE_TIMEOUT_MINUTES} minutes of inactivity.\n"
                     "Use `!up` to start it again."
                 )
             notified_shutdown = True
@@ -137,10 +150,7 @@ async def monitor_shutdown():
 async def get_ip(ctx):
     """Get the Minecraft server IP address"""
     try:
-        with urllib.request.urlopen('https://api.ipify.org', timeout=10) as response:
-            public_ip = response.read().decode('utf-8')
-        
-        await ctx.send(f"**Minecraft Server IP:**\nJava: `{public_ip}:{MINECRAFT_PORT}`\nBedrock: `{public_ip}:{BEDROCK_PORT}`")
+        await ctx.send(f"**Minecraft Server:** {get_public_address()}")
     except Exception as e:
         await ctx.send(f"Failed to get IP: {e}")
 
@@ -148,14 +158,16 @@ async def get_ip(ctx):
 @bot.command(name='status')
 async def get_status(ctx):
     """Check if Minecraft server is running and show player count"""
-    result = subprocess.run(['systemctl', 'is-active', 'minecraft'], capture_output=True, text=True)
+    result = subprocess.run(
+        ['systemctl', 'is-active', MINECRAFT_SERVICE],
+        capture_output=True,
+        text=True
+    )
     status = result.stdout.strip()
     
     # Get public IP
     try:
-        with urllib.request.urlopen('https://api.ipify.org', timeout=10) as response:
-            public_ip = response.read().decode('utf-8')
-        ip_str = f"Java: `{public_ip}:{MINECRAFT_PORT}` | Bedrock: `{public_ip}:{BEDROCK_PORT}`"
+        ip_str = get_public_address()
     except Exception:
         ip_str = "(couldn't fetch IP)"
     
@@ -176,14 +188,16 @@ async def start_server(ctx):
     """Start the Minecraft server if it's not running"""
     # Get public IP
     try:
-        with urllib.request.urlopen('https://api.ipify.org', timeout=10) as response:
-            public_ip = response.read().decode('utf-8')
-        ip_str = f"Java: `{public_ip}:{MINECRAFT_PORT}` | Bedrock: `{public_ip}:{BEDROCK_PORT}`"
+        ip_str = get_public_address()
     except Exception:
         ip_str = "(couldn't fetch IP)"
     
     # Check if already running
-    result = subprocess.run(['systemctl', 'is-active', 'minecraft'], capture_output=True, text=True)
+    result = subprocess.run(
+        ['systemctl', 'is-active', MINECRAFT_SERVICE],
+        capture_output=True,
+        text=True
+    )
     if result.stdout.strip() == 'active':
         await ctx.send(f"Server is already **online**! Connect to {ip_str}")
         return
@@ -192,7 +206,7 @@ async def start_server(ctx):
     
     # Start the server via systemctl
     result = subprocess.run(
-        ['sudo', 'systemctl', 'start', 'minecraft'],
+        ['sudo', 'systemctl', 'start', MINECRAFT_SERVICE],
         capture_output=True,
         text=True
     )
