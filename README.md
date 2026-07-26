@@ -15,7 +15,7 @@ automatic idle shutdown.
 ## Requirements
 
 - Raspberry Pi OS, Debian, or Ubuntu
-- Java 21+
+- Java 25 for the default Paper 26.1.2 release
 - Python 3 with the `venv` module
 - A Discord bot token if Discord control is wanted
 
@@ -83,6 +83,7 @@ Rerun the installer with options to change generated settings:
 --minecraft-port PORT
 --rcon-port PORT
 --memory MB
+--java-bin PATH
 --instance NAME
 --no-discord
 --install-services
@@ -90,8 +91,9 @@ Rerun the installer with options to change generated settings:
 --dry-run
 ```
 
-The defaults are authenticated Java Edition on port `25565`, local RCON on
-`25575`, and 3584 MiB of memory. Bedrock support is not installed or advertised.
+The defaults are Paper 26.1.2, authenticated Java Edition on port `25565`,
+local RCON on `25575`, and 3584 MiB of memory. Paper 26.1+ requires Java 25;
+older 1.21.x releases use Java 21. Bedrock support is not installed or advertised.
 Forward only the Minecraft port through the router; never expose the RCON port.
 
 ## Safe staging instance

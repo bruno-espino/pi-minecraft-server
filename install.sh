@@ -7,10 +7,11 @@ set -euo pipefail
 INSTALL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_USER="${SUDO_USER:-$USER}"
 INSTANCE="main"
-MINECRAFT_VERSION="1.21.11"
+MINECRAFT_VERSION="26.1.2"
 MINECRAFT_PORT=25565
 RCON_PORT=25575
 MEMORY_MB=3584
+JAVA_BIN="${JAVA_BIN:-java}"
 WITH_DISCORD=true
 INSTALL_SERVICES=false
 START_SERVICES=false
@@ -24,10 +25,11 @@ Usage: ./install.sh [options]
 
 Options:
   --instance NAME           Instance name (default: main)
-  --minecraft-version VER  Paper/Minecraft version (default: 1.21.11)
+  --minecraft-version VER  Paper/Minecraft version (default: 26.1.2)
   --minecraft-port PORT     Java server port (default: 25565)
   --rcon-port PORT          Local RCON port (default: 25575)
   --memory MB               JVM memory in MiB (default: 3584)
+  --java-bin PATH           Java executable for Minecraft
   --no-discord              Configure only Minecraft and the idle monitor
   --install-services        Install and enable systemd units
   --start                   Start installed services after installation
@@ -53,6 +55,7 @@ while [ "$#" -gt 0 ]; do
         --minecraft-port) MINECRAFT_PORT="${2:?missing port}"; shift 2 ;;
         --rcon-port) RCON_PORT="${2:?missing port}"; shift 2 ;;
         --memory) MEMORY_MB="${2:?missing memory}"; shift 2 ;;
+        --java-bin) JAVA_BIN="${2:?missing Java path}"; shift 2 ;;
         --no-discord) WITH_DISCORD=false; shift ;;
         --install-services) INSTALL_SERVICES=true; shift ;;
         --start) START_SERVICES=true; INSTALL_SERVICES=true; shift ;;
@@ -89,6 +92,7 @@ echo "  Minecraft/Paper:   $MINECRAFT_VERSION"
 echo "  Minecraft port:    $MINECRAFT_PORT"
 echo "  RCON port:         $RCON_PORT"
 echo "  JVM memory:        ${MEMORY_MB} MiB"
+echo "  Java executable:   $JAVA_BIN"
 echo "  Discord bot:       $WITH_DISCORD"
 echo "  Install services:  $INSTALL_SERVICES"
 echo "  Service names:     $MC_SERVICE, $MONITOR_SERVICE"
@@ -100,9 +104,13 @@ if [ "$DRY_RUN" = true ]; then
 fi
 
 command -v python3 >/dev/null || fail "Python 3 is required"
-command -v java >/dev/null || fail "Java 21 is required; install it before running this installer"
-JAVA_MAJOR=$(java -version 2>&1 | head -1 | cut -d'"' -f2 | cut -d'.' -f1)
-[[ "$JAVA_MAJOR" =~ ^[0-9]+$ ]] && (( JAVA_MAJOR >= 21 )) || fail "Java 21 or newer is required"
+command -v "$JAVA_BIN" >/dev/null || fail "Java executable not found: $JAVA_BIN"
+JAVA_BIN=$(command -v "$JAVA_BIN")
+JAVA_MAJOR=$("$JAVA_BIN" -version 2>&1 | head -1 | cut -d'"' -f2 | cut -d'.' -f1)
+REQUIRED_JAVA=21
+[[ "$MINECRAFT_VERSION" = 26.* ]] && REQUIRED_JAVA=25
+[[ "$JAVA_MAJOR" =~ ^[0-9]+$ ]] && (( JAVA_MAJOR >= REQUIRED_JAVA )) ||
+    fail "Minecraft $MINECRAFT_VERSION requires Java $REQUIRED_JAVA+"
 
 if [ "$ACCEPT_EULA" != true ]; then
     [ "$NON_INTERACTIVE" = false ] || fail "pass --accept-eula after reviewing https://aka.ms/MinecraftEULA"
@@ -144,7 +152,9 @@ NOTIFICATION_CHANNEL_ID=$NOTIFICATION_CHANNEL_ID
 RCON_PASSWORD=$RCON_PASSWORD
 RCON_HOST=localhost
 RCON_PORT=$RCON_PORT
+MINECRAFT_VERSION=$MINECRAFT_VERSION
 MINECRAFT_PORT=$MINECRAFT_PORT
+JAVA_BIN=$JAVA_BIN
 MINECRAFT_SERVICE=$MC_SERVICE
 IDLE_TIMEOUT_MINUTES=$IDLE_TIMEOUT_MINUTES
 CHECK_INTERVAL_SECONDS=$CHECK_INTERVAL_SECONDS
@@ -184,6 +194,7 @@ echo "eula=true" > "$INSTALL_DIR/server/eula.txt"
 sed \
     -e "s|__INSTALL_DIR__|$INSTALL_DIR|g" \
     -e "s|__MEMORY_MB__|$MEMORY_MB|g" \
+    -e "s|__JAVA_BIN__|$JAVA_BIN|g" \
     "$INSTALL_DIR/server/start.sh.template" \
     > "$INSTALL_DIR/server/start.sh"
 chmod 755 "$INSTALL_DIR/server/start.sh"
@@ -204,7 +215,10 @@ render_unit "$INSTALL_DIR/minecraft.service.template" "$MC_UNIT"
 render_unit "$INSTALL_DIR/discord-bot/discord-bot.service.template" "$BOT_UNIT"
 render_unit "$INSTALL_DIR/mc-manager/minecraft-monitor.service.template" "$MONITOR_UNIT"
 
-if [ ! -f "$INSTALL_DIR/server/server.jar" ]; then
+INSTALLED_VERSION=""
+[ ! -f "$INSTALL_DIR/server/.paper-version" ] ||
+    INSTALLED_VERSION=$(cat "$INSTALL_DIR/server/.paper-version")
+if [ ! -f "$INSTALL_DIR/server/server.jar" ] || [ "$INSTALLED_VERSION" != "$MINECRAFT_VERSION" ]; then
     echo "Downloading the latest stable Paper build for $MINECRAFT_VERSION..."
     python3 - "$MINECRAFT_VERSION" "$INSTALL_DIR/server/server.jar" <<'PY'
 import hashlib
@@ -238,6 +252,7 @@ if expected:
 partial.replace(target)
 print(f"Downloaded {download['name']}")
 PY
+    printf '%s\n' "$MINECRAFT_VERSION" > "$INSTALL_DIR/server/.paper-version"
 fi
 
 if [ ! -x "$INSTALL_DIR/venv/bin/python" ]; then

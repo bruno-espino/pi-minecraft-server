@@ -40,13 +40,17 @@ if [ -f "$INSTALL_DIR/.env" ]; then
     [ -n "$service" ] && pass "Minecraft service is $service" || fail "MINECRAFT_SERVICE is missing"
 fi
 
-if command -v java >/dev/null; then
-    java_major=$(java -version 2>&1 | head -1 | cut -d'"' -f2 | cut -d'.' -f1)
-    [[ "$java_major" =~ ^[0-9]+$ ]] && (( java_major >= 21 )) &&
-        pass "Java $java_major is supported" ||
-        fail "Java 21+ is required"
+java_bin=$(env_value JAVA_BIN)
+if [ -n "$java_bin" ] && [ -x "$java_bin" ]; then
+    java_major=$("$java_bin" -version 2>&1 | head -1 | cut -d'"' -f2 | cut -d'.' -f1)
+    minecraft_version=$(env_value MINECRAFT_VERSION)
+    required_java=21
+    [[ "$minecraft_version" = 26.* ]] && required_java=25
+    [[ "$java_major" =~ ^[0-9]+$ ]] && (( java_major >= required_java )) &&
+        pass "Configured Java $java_major is available" ||
+        fail "Minecraft $minecraft_version requires Java $required_java+"
 else
-    fail "Java is missing"
+    fail "Configured JAVA_BIN is missing or not executable"
 fi
 
 [ -x "$INSTALL_DIR/venv/bin/python" ] &&

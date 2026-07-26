@@ -21,6 +21,7 @@ server/versions/
 server/cache/
 server/server.properties
 server/eula.txt
+server/.paper-version
 server/*.yml
 server/*.dat
 server/*.json
