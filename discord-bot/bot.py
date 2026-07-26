@@ -35,10 +35,37 @@ DEFAULT_STATE_FILE = os.path.join(
 )
 STATE_FILE = os.environ.get('STATE_FILE', DEFAULT_STATE_FILE)
 IDLE_TIMEOUT_MINUTES = int(os.environ.get('IDLE_TIMEOUT_MINUTES', 30))
+SERVER_VERSION_FILE = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    'server',
+    '.paper-version'
+)
 
 intents = discord.Intents.default()
 intents.message_content = True
-bot = commands.Bot(command_prefix='!', intents=intents)
+bot = commands.Bot(command_prefix='!', intents=intents, help_command=None)
+
+
+def get_server_version():
+    """Return the configured Minecraft version, including while offline."""
+    configured = os.environ.get('MINECRAFT_VERSION')
+    if configured:
+        return configured
+    try:
+        with open(SERVER_VERSION_FILE, 'r') as version_file:
+            return version_file.read().strip() or "unknown"
+    except OSError:
+        return "unknown"
+
+
+def is_server_running():
+    """Return whether the configured Minecraft systemd service is active."""
+    result = subprocess.run(
+        ['systemctl', 'is-active', MINECRAFT_SERVICE],
+        capture_output=True,
+        text=True
+    )
+    return result.returncode == 0 and result.stdout.strip() == 'active'
 
 
 def get_public_address():
@@ -104,10 +131,33 @@ def read_server_state():
 @bot.event
 async def on_ready():
     print(f'{bot.user} is online!')
-    # Only start monitor task once (on_ready can fire multiple times on reconnect)
-    if not hasattr(bot, '_monitor_task_started'):
-        bot._monitor_task_started = True
+    # on_ready can fire multiple times after reconnects.
+    if not hasattr(bot, '_background_tasks_started'):
+        bot._background_tasks_started = True
         bot.loop.create_task(monitor_shutdown())
+        bot.loop.create_task(monitor_presence())
+
+
+async def update_presence():
+    """Show the server version and current lifecycle state on the bot user."""
+    online = is_server_running()
+    state = "Online" if online else "Offline • !up"
+    status = discord.Status.online if online else discord.Status.idle
+    await bot.change_presence(
+        status=status,
+        activity=discord.Game(name=f"Minecraft {get_server_version()} • {state}")
+    )
+
+
+async def monitor_presence():
+    """Refresh Discord presence as Minecraft starts and stops."""
+    await bot.wait_until_ready()
+    while not bot.is_closed():
+        try:
+            await update_presence()
+        except Exception as error:
+            print(f"Error updating presence: {error}")
+        await asyncio.sleep(30)
 
 
 async def monitor_shutdown():
@@ -150,7 +200,9 @@ async def monitor_shutdown():
 async def get_ip(ctx):
     """Get the Minecraft server IP address"""
     try:
-        await ctx.send(f"**Minecraft Server:** {get_public_address()}")
+        await ctx.send(
+            f"**Minecraft {get_server_version()} Server:** {get_public_address()}"
+        )
     except Exception as e:
         await ctx.send(f"Failed to get IP: {e}")
 
@@ -158,29 +210,34 @@ async def get_ip(ctx):
 @bot.command(name='status')
 async def get_status(ctx):
     """Check if Minecraft server is running and show player count"""
-    result = subprocess.run(
-        ['systemctl', 'is-active', MINECRAFT_SERVICE],
-        capture_output=True,
-        text=True
-    )
-    status = result.stdout.strip()
-    
     # Get public IP
     try:
         ip_str = get_public_address()
     except Exception:
         ip_str = "(couldn't fetch IP)"
     
-    if status == 'active':
+    version = get_server_version()
+    if is_server_running():
         player_count, players = get_player_info()
         if player_count > 0:
-            await ctx.send(f"Server **online** - {ip_str}\n**{player_count}** player(s): {players}")
+            await ctx.send(
+                f"Server **online** • Minecraft **{version}** • {ip_str}\n"
+                f"**{player_count}** player(s): {players}"
+            )
         elif player_count == 0:
-            await ctx.send(f"Server **online** - {ip_str}\nNo players connected")
+            await ctx.send(
+                f"Server **online** • Minecraft **{version}** • {ip_str}\n"
+                "No players connected"
+            )
         else:
-            await ctx.send(f"Server **online** (starting up...) - {ip_str}")
+            await ctx.send(
+                f"Server **online** (starting up...) • Minecraft **{version}** • {ip_str}"
+            )
     else:
-        await ctx.send(f"Server **offline**\nUse `!up` to start it, then connect to {ip_str}")
+        await ctx.send(
+            f"Server **offline** • Minecraft **{version}**\n"
+            f"Use `!up` to start it, then connect to {ip_str}"
+        )
 
 
 @bot.command(name='up')
@@ -193,16 +250,16 @@ async def start_server(ctx):
         ip_str = "(couldn't fetch IP)"
     
     # Check if already running
-    result = subprocess.run(
-        ['systemctl', 'is-active', MINECRAFT_SERVICE],
-        capture_output=True,
-        text=True
-    )
-    if result.stdout.strip() == 'active':
-        await ctx.send(f"Server is already **online**! Connect to {ip_str}")
+    version = get_server_version()
+    if is_server_running():
+        await ctx.send(
+            f"Minecraft **{version}** is already **online**! Connect to {ip_str}"
+        )
         return
     
-    await ctx.send("Starting Minecraft server... (this takes about 30-60 seconds)")
+    await ctx.send(
+        f"Starting Minecraft **{version}**... (this takes about 30-60 seconds)"
+    )
     
     # Start the server via systemctl
     result = subprocess.run(
@@ -222,12 +279,27 @@ async def start_server(ctx):
             rcon = RCONClient(RCON_HOST, RCON_PORT, RCON_PASSWORD)
             rcon.connect()
             rcon.close()
-            await ctx.send(f"Minecraft server is now **online**! Connect and play!\n{ip_str}")
+            await update_presence()
+            await ctx.send(
+                f"Minecraft **{version}** is now **online**! Connect and play!\n{ip_str}"
+            )
             return
         except Exception:
             continue
     
     await ctx.send("Server started but may still be loading. Try `!status` in a minute.")
+
+
+@bot.command(name='help')
+async def show_help(ctx):
+    """Show Minecraft server bot commands."""
+    await ctx.send(
+        f"**Minecraft {get_server_version()} Server Commands**\n"
+        "`!status` — server state, address, and players\n"
+        "`!ip` — connection address\n"
+        "`!up` — start the server when offline\n"
+        "`!help` — show this message"
+    )
 
 
 if __name__ == '__main__':

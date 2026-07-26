@@ -6,7 +6,8 @@ automatic idle shutdown.
 ## Features
 
 - Paper configured for an 8 GB Raspberry Pi
-- `!ip`, `!status`, and `!up` Discord commands
+- Version-aware `!ip`, `!status`, `!up`, and `!help` Discord commands
+- Discord presence showing whether Minecraft is online or offline
 - Graceful shutdown after 30 minutes without players
 - Isolated named instances for safe testing
 - Generated RCON password and protected `.env`
@@ -64,6 +65,7 @@ Read Message History permissions.
 | `!ip` | Show the Java server address |
 | `!status` | Show server and player status |
 | `!up` | Start Minecraft |
+| `!help` | Show the available commands |
 
 Set `NOTIFICATION_CHANNEL_ID` in `.env` to announce idle shutdowns.
 
