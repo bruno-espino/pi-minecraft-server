@@ -15,6 +15,7 @@ import subprocess
 import os
 import asyncio
 import sys
+import re
 
 # Add parent directory to path to import shared module
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -75,6 +76,31 @@ def get_public_address():
     return f"`{public_ip}:{MINECRAFT_PORT}`"
 
 
+def parse_player_list(response):
+    """Parse player count and names from vanilla or plugin list output."""
+    response = strip_color_codes(response).strip()
+    count_match = re.search(r"There are\s+(\d+)\b", response, re.IGNORECASE)
+    if not count_match:
+        return -1, ""
+
+    count = int(count_match.group(1))
+    names = []
+    lines = response.splitlines()
+
+    # Paper 26.1+: "There are 2 ... players online: Alice, Bob"
+    inline_match = re.search(r"players online:\s*(.*)$", lines[0], re.IGNORECASE)
+    if inline_match and inline_match.group(1).strip():
+        names.append(inline_match.group(1).strip())
+
+    # Some plugins put names on later lines: "group: Alice, Bob"
+    for line in lines[1:]:
+        value = line.split(':', 1)[1].strip() if ':' in line else line.strip()
+        if value:
+            names.append(value)
+
+    return count, ", ".join(names)
+
+
 def get_player_info():
     """Get player count and names from server."""
     try:
@@ -83,33 +109,7 @@ def get_player_info():
         response = rcon.command("list")
         rcon.close()
         
-        # Strip color codes first
-        response = strip_color_codes(response)
-        
-        # Parse "There are X out of maximum Y players online.\ngroup: player1, player2"
-        lines = response.strip().split('\n')
-        first_line = lines[0] if lines else ""
-        
-        # Extract player names from subsequent lines (format: "group: player1, player2")
-        players = ""
-        if len(lines) > 1:
-            player_lines = []
-            for line in lines[1:]:
-                if ':' in line:
-                    player_lines.append(line.split(':', 1)[1].strip())
-            players = ", ".join(player_lines)
-        
-        # Extract count - look for number after "are"
-        if "There are" in first_line:
-            words = first_line.split()
-            for i, word in enumerate(words):
-                if word == "are" and i + 1 < len(words):
-                    try:
-                        count = int(words[i + 1])
-                        return count, players
-                    except ValueError:
-                        pass
-        return 0, ""
+        return parse_player_list(response)
     except Exception:
         return -1, ""
 

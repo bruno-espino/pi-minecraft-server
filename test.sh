@@ -66,6 +66,12 @@ else
     warn "Discord is not configured"
 fi
 
+if "$INSTALL_DIR/venv/bin/python" "$INSTALL_DIR/test_bot.py" >/dev/null 2>&1; then
+    pass "Discord bot helper tests pass"
+else
+    fail "Discord bot helper tests failed"
+fi
+
 shopt -s nullglob
 units=(
     "$INSTALL_DIR"/minecraft*.service
