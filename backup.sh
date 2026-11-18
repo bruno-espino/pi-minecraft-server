@@ -14,6 +14,7 @@ rcon() { "$DIR/.venv/bin/python" -m minecraft_manager rcon "$@" >/dev/null; }
 
 LEVEL="$(value level-name "$SERVER_DIR/server.properties")"
 LEVEL="${LEVEL:-world}"
+[[ "$LEVEL" =~ ^[A-Za-z0-9._][A-Za-z0-9._-]*$ ]] || { echo "Unsupported level-name: $LEVEL" >&2; exit 1; }
 [ -f "$SERVER_DIR/$LEVEL/level.dat" ] || { echo "No world to back up yet"; exit 0; }
 
 mkdir -p "$BACKUP_DIR"
@@ -53,7 +54,11 @@ items=("${worlds[@]}")
 for item in server.properties ops.json whitelist.json banned-players.json banned-ips.json config plugins mods; do
     [ ! -e "$SERVER_DIR/$item" ] || items+=("$item")
 done
-tar -C "$SERVER_DIR" --exclude='*.jar' -czf "$archive.part" -- "${items[@]}"
+args=(-C "$SERVER_DIR" "${items[@]}")
+for list in mods.txt plugins.txt; do  # local, untracked choices; keep them too
+    [ ! -f "$DIR/$list" ] || args+=(-C "$DIR" "$list")
+done
+tar --exclude='*.jar' -czf "$archive.part" "${args[@]}"
 
 if [ "$saving_off" = true ]; then
     rcon save-on

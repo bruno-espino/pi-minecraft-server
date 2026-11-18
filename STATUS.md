@@ -27,3 +27,12 @@
   at ~2.7 GiB of the 4 GiB heap limit. The Pi reached 85 C and throttled even
   with the fan running; it idles at 64-66 C.
 - Next: pregenerate the world before inviting players, and improve cooling.
+
+## 2026-11-17: pregeneration, FallingTree, local mod lists
+
+- Pregenerated the pi1 world with Chunky: 1,500-block circle around spawn,
+  35,721 chunks in 9 min 11 s, peak 84 C.
+- Mod and plugin lists are now local, untracked files (`mods.txt`,
+  `plugins.txt`) created from `mods.example.txt` / `plugins.example.txt`, so
+  the shared repo only suggests server-side defaults. Backups include them.
+  pi1's list holds the group's mods plus FallingTree.
