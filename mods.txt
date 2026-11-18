@@ -1,0 +1,16 @@
+# Fabric mods for the server, as Modrinth project names (the last part of
+# https://modrinth.com/mod/<name>). install.sh downloads the newest build for the
+# configured Minecraft version, plus any required dependencies, and refuses to
+# continue if one is missing. Client-only mods are skipped automatically.
+
+# Performance (server-side only; players don't need these)
+fabric-api
+lithium
+ferrite-core
+krypton
+
+# Tools: spark (/spark profiler) and Chunky (/chunky pregeneration)
+spark
+chunky
+
+# Gameplay mods from the group's list go below. Players need the same ones.

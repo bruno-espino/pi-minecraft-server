@@ -1,166 +1,143 @@
 # Minecraft Server for Raspberry Pi
 
-A small Paper Minecraft server for Raspberry Pi 5 with Discord control and
-automatic idle shutdown.
+A Paper or Fabric Minecraft server for a Raspberry Pi 5 (8 GB), with a Discord
+bot to start it, automatic shutdown when nobody is playing, and nightly backups.
 
-## Features
-
-- Paper configured for an 8 GB Raspberry Pi
-- Version-aware `!ip`, `!status`, `!up`, and `!help` Discord commands
-- Discord presence showing whether Minecraft is online or offline
-- Graceful shutdown after 30 minutes without players
-- Isolated named instances for safe testing
-- Generated RCON password and protected `.env`
-- systemd services for Minecraft, Discord, and the idle monitor
+- `install.sh` installs or updates everything and can be rerun safely
+- Paper (plugins) or Fabric (mods), with mods and plugins downloaded from Modrinth
+- Discord: `!up`, `!status`, `!ip`, `!help`, plus a message when the server shuts down
+- Shuts down after 30 minutes without players; starts again after a power cut
+- Nightly backups that skip unchanged worlds and keep the newest seven
 
 ## Requirements
 
-- Raspberry Pi OS, Debian, or Ubuntu
-- Java 25 for the default Paper 26.1.2 release
-- Python 3 with the `venv` module
-- A Discord bot token if Discord control is wanted
+- Raspberry Pi OS / Debian / Ubuntu with systemd, `python3` and `python3-venv`
+- Java 25 for Minecraft 26.x (the installer finds it under `/usr/lib/jvm`)
+- Optional: a Discord bot token
 
 ## Install
 
 ```bash
 git clone https://github.com/bruno-espino/pi-minecraft-server.git
 cd pi-minecraft-server
-./install.sh --install-services
+./install.sh --server fabric --version 26.3
 ```
 
-The installer asks for EULA acceptance, a Discord token, and confirmation
-before changing system services. It downloads a stable Paper build, generates
-one root `.env`, creates a Python virtual environment, and enables the units.
+The installer asks you to accept the Minecraft EULA and for a Discord token
+(leave it empty to run without Discord), shows a summary, and then:
 
-Start and inspect the installation:
+1. writes `.env` (mode 600) with every setting, so later runs keep them
+2. downloads the server jar and the mods or plugins
+3. creates `server/` with `server.properties`, `start.sh` and the world
+4. installs three systemd units: `minecraft`, `minecraft-manager` (bot and idle
+   shutdown) and `minecraft-backup.timer`, plus a sudo rule that lets the
+   manager start and stop `minecraft`
 
-```bash
-./manage.sh start
-./manage.sh status
-./test.sh
-```
+Run `./install.sh --help` for all options. Useful ones:
 
-To omit Discord:
-
-```bash
-./install.sh --no-discord --install-services
-```
-
-For an unattended installation, provide the token through the environment:
-
-```bash
-DISCORD_TOKEN='...' ./install.sh \
-  --accept-eula --non-interactive --install-services
-```
-
-## Discord setup
-
-Create a bot in the
-[Discord Developer Portal](https://discord.com/developers/applications), enable
-the Message Content intent, and invite it with View Channel, Send Messages, and
-Read Message History permissions.
-
-| Command | Purpose |
+| Option | Purpose |
 |---|---|
-| `!ip` | Show the Java server address |
-| `!status` | Show server and player status |
-| `!up` | Start Minecraft |
-| `!help` | Show the available commands |
+| `--server paper\|fabric` | Server software |
+| `--version 26.3` | Minecraft version |
+| `--memory 4096` | Maximum Java heap in MiB |
+| `--online-mode false` | Allow players without official accounts (see Security) |
+| `--new-world` | Move the current world to `backups/old-worlds/` and start fresh |
 
-Set `NOTIFICATION_CHANNEL_ID` in `.env` to announce idle shutdowns.
+Everything the installer creates (`.env`, `server/`, `backups/`, `.venv/`) is
+ignored by git, so updating is `git pull && ./install.sh`.
 
-## Configuration
+## Mods and plugins
 
-The installer owns these generated files:
+List Modrinth project names (from `https://modrinth.com/mod/<name>`) in
+`mods.txt` for Fabric or `plugins.txt` for Paper, then rerun `./install.sh`.
+For each project it downloads the newest build for your Minecraft version,
+checks its hash, and adds required dependencies. It stops with a list if any mod
+has no build for that version. It skips client-only mods (shaders, minimaps),
+and removes mods it installed earlier that are no longer listed. Jars you add by
+hand are left alone.
 
-- `.env` — bot, RCON, ports, timeout, and service name
-- `server/server.properties` — Minecraft and RCON configuration
-- `server/start.sh` — JVM memory and launch command
-- generated `.service` files — systemd definitions
+Players need Fabric and the same gameplay mods as the server. Sharing a Modrinth
+modpack or a Prism Launcher instance is easier than sending a list. The
+performance mods in `mods.txt` (Lithium, FerriteCore, Krypton) are server-only.
 
-Rerun the installer with options to change generated settings:
+Restart the server after changing mods: `sudo systemctl restart minecraft`.
 
-```text
---minecraft-version VERSION
---minecraft-port PORT
---rcon-port PORT
---memory MB
---java-bin PATH
---instance NAME
---no-discord
---install-services
---start
---dry-run
-```
+## Discord
 
-The defaults are Paper 26.1.2, authenticated Java Edition on port `25565`,
-local RCON on `25575`, and 3584 MiB of memory. Paper 26.1+ requires Java 25;
-older 1.21.x releases use Java 21. Bedrock support is not installed or advertised.
-Forward only the Minecraft port through the router; never expose the RCON port.
+Create an application in the
+[Discord Developer Portal](https://discord.com/developers/applications), add a
+bot, enable **Message Content Intent**, and invite it with View Channels, Send
+Messages and Read Message History.
 
-## Safe staging instance
+| Command | Does |
+|---|---|
+| `!up` | Starts the server and reports when it is ready |
+| `!status` | Online or offline, and who is playing |
+| `!ip` | Connection address |
+| `!help` | Command list |
 
-A named instance gets unique unit names. Give it unique ports and a smaller
-memory allocation:
+Set `NOTIFICATION_CHANNEL_ID` in `.env` to post a message when the server shuts
+down for inactivity, and `SERVER_ADDRESS` to show a hostname instead of the
+public IP. Restart the manager afterwards: `sudo systemctl restart minecraft-manager`.
+
+## Settings in `.env`
+
+The installer owns `.env` but keeps your values. Besides the options above:
+
+| Setting | Default | Purpose |
+|---|---|---|
+| `IDLE_TIMEOUT_MINUTES` | 30 | Minutes without players before shutdown |
+| `AUTO_SHUTDOWN` | true | Set to false during long jobs such as pregeneration |
+| `CHECK_INTERVAL_SECONDS` | 60 | How often the player count is checked |
+| `BACKUP_KEEP` | 7 | Number of backups to keep |
+| `NOTIFICATION_CHANNEL_ID` | | Discord channel for shutdown messages |
+| `SERVER_ADDRESS` | | Hostname shown by `!ip` and `!status` |
+
+Game settings (difficulty, MOTD, view distance) live in `server/server.properties`.
+The installer only manages the port, RCON and online-mode lines there.
+
+## Day to day
 
 ```bash
-./install.sh \
-  --instance staging \
-  --minecraft-port 25566 \
-  --rcon-port 25576 \
-  --memory 1280 \
-  --no-discord \
-  --accept-eula \
-  --non-interactive
+sudo systemctl start|stop|restart minecraft     # the server
+systemctl status minecraft minecraft-manager    # what is running
+journalctl -u minecraft -f                      # server console output
+journalctl -u minecraft-manager -f              # bot and idle shutdown
+.venv/bin/python -m minecraft_manager rcon list # run a console command
+./backup.sh                                     # back up now
 ```
 
-Run it manually from `server/start.sh`, or add `--install-services` after
-reviewing the generated configuration. Do not run two servers simultaneously
-unless the machine has enough free memory.
+`systemctl stop minecraft` saves the world through the console before stopping.
 
-## Operations
+### Restoring a backup
 
 ```bash
-./manage.sh start [instance]
-./manage.sh stop [instance]
-./manage.sh restart [instance]
-./manage.sh status [instance]
-sudo journalctl -u minecraft -f
+sudo systemctl stop minecraft
+mv server/world server/world.broken
+tar -xzf backups/world-YYYYMMDD-HHMMSS.tar.gz -C server
+sudo systemctl start minecraft
 ```
 
-The idle monitor does not start Minecraft merely because the monitor itself
-starts. Minecraft is started explicitly or through `!up`.
+## Performance on a Pi 5
+
+- **Memory:** the server starts with a 1 GiB heap and can grow to `--memory`.
+  On Paper this used about 1.5 GiB with a few players, where a fixed 3.5 GiB heap
+  held 4 GiB from startup. Java 25's default garbage collector settings kept 20
+  TPS; extra JVM flags were not needed.
+- **New terrain is the expensive part.** Exploring ungenerated land caused
+  multi-second stalls; pregenerated land did not. Before inviting players, run
+  for example `chunky radius 1500` then `chunky start` from the console, with
+  `AUTO_SHUTDOWN=false` until it finishes. Vanilla and Fabric pause an empty
+  server after a minute; if pregeneration stalls, set
+  `pause-when-empty-seconds=-1` in `server.properties` while it runs.
+- **Profiling:** `spark` is in `mods.txt` and built into Paper. Use
+  `/spark profiler` or `/spark tps` in game.
+- Keep the Pi cool: it reports throttling with `vcgencmd get_throttled`.
 
 ## Security
 
-- Online authentication and secure profiles are enabled by default.
-- `.env` is created with mode `600`.
-- RCON uses an automatically generated password and should not be forwarded
-  through the router.
-- Discord commands are available to members who can access the bot's channel.
-- Do not commit `.env`, server data, or generated service files.
-
-## Troubleshooting
-
-Run `./test.sh`, then inspect the relevant journal:
-
-```bash
-sudo journalctl -u minecraft -n 100
-sudo journalctl -u discord-bot -n 100
-sudo journalctl -u minecraft-monitor -n 100
-```
-
-Paper can take a minute to generate its first world. If installation cannot
-create `venv`, install the distribution's `python3-venv` package.
-
-## Uninstall system services
-
-Stop the instance, remove its three unit files and corresponding
-`/etc/sudoers.d/minecraft-INSTANCE` file, then run:
-
-```bash
-sudo systemctl daemon-reload
-```
-
-Worlds, configuration, and secrets remain in the cloned directory until
-removed manually.
+- Forward only the Minecraft port on your router. RCON listens on the Pi and
+  should never be forwarded.
+- With `--online-mode false`, the server doesn't check accounts, so anyone can join
+  with any username, including an operator's. Keep the operator list short, or
+  use a whitelist or an authentication mod if the server is public.

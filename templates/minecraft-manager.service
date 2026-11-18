@@ -1,0 +1,17 @@
+[Unit]
+Description=Minecraft manager (Discord bot and idle shutdown)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=__USER__
+WorkingDirectory=__DIR__
+EnvironmentFile=__DIR__/.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=__DIR__/.venv/bin/python -m minecraft_manager
+Restart=always
+RestartSec=15
+
+[Install]
+WantedBy=multi-user.target
