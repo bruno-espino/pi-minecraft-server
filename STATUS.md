@@ -43,3 +43,19 @@
   on pi1 was refused by an empty whitelist. Turned it off there (as the old
   server had it), and `install.sh` now writes the setting explicitly on new
   installs, with `--whitelist on|off` to change it later.
+
+## 2026-11-18: world reset for new mods, realistic load test
+
+- pi1 got a second batch of the group's mods, including world-generation mods,
+  so the world was reset at the group's request (the old one is archived under
+  `backups/old-worlds/`) and pregenerated again (r=1500 in 17:38, ~2x slower
+  than vanilla terrain). The `client` tag now also makes client-required mods
+  such as minimaps optional in the player pack (PR #8).
+- Load test with 8 Carpet fake players in creative mode, so mobs spawn and
+  chunks tick like with real players (the spectator test above under-measured):
+  standing ~700 blocks apart in generated terrain settled at ~38 ms per tick of
+  the 50 ms budget; exploring new terrain caused repeated 2-4 s stalls. Memory
+  peaked at ~4.5 GiB RSS; the Pi throttled at 84-86 C. Real play with 3 players
+  runs at ~14 ms per tick.
+- If it lags with more players: lower `simulation-distance` (an incomplete run
+  at 4 settled at ~31 ms), drop heavy mods, improve cooling.
