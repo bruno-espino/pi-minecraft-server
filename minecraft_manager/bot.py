@@ -1,4 +1,4 @@
-"""Discord commands: !status, !ip, !up and !help."""
+"""Discord commands: !status, !ip, !up, !mods and !help."""
 
 import asyncio
 import time
@@ -115,6 +115,19 @@ def create_bot(config):
                     return
             await message.edit(content="Still loading after 5 minutes. Try `!status` shortly.")
 
+    @bot.command(name="mods")
+    async def mods(ctx):
+        summary, pack = server.client_mods()
+        text = server.format_mods_message(config, summary)
+        if config.server_type != "fabric" or not pack:
+            await ctx.send(text)
+            return
+        filename = f"minecraft-{config.minecraft_version}-mods.mrpack"
+        try:
+            await ctx.send(text, file=discord.File(pack, filename=filename))
+        except discord.Forbidden:
+            await ctx.send(text + "\n_(I need the **Attach Files** permission in this channel to share the pack.)_")
+
     @bot.command(name="help")
     async def help_command(ctx):
         await ctx.send(
@@ -122,6 +135,7 @@ def create_bot(config):
             "`!status`: online or not, and who is playing\n"
             "`!ip`: the address to connect to\n"
             "`!up`: start the server\n"
+            "`!mods`: the mods to install, with a one-click pack\n"
             f"It shuts down by itself after {config.idle_timeout_minutes} minutes with nobody online."
         )
 
