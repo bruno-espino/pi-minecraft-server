@@ -17,6 +17,7 @@ Usage: ./install.sh [options]
   --port PORT               Minecraft port (default: 25565)
   --rcon-port PORT          Local RCON port (default: 25575)
   --online-mode true|false  Require official Minecraft accounts (default: true)
+  --whitelist on|off        Only let listed players join (new installs: off)
   --new-world               Archive the current world so the next start makes a new one
   --no-services             Skip systemd units, sudo rules and the backup timer
   --accept-eula             Accept https://aka.ms/MinecraftEULA without asking
@@ -33,7 +34,7 @@ fail() { echo "Error: $*" >&2; exit 1; }
 env_value() { [ -f "$DIR/.env" ] && sed -n "s/^$1=//p" "$DIR/.env" | tail -1 || true; }
 ask() { [ "$YES" = true ] && return 0; read -r -p "$1 [y/N] " reply; [[ "$reply" =~ ^[Yy]$ ]]; }
 
-SERVER_TYPE="" VERSION="" MEMORY_MB="" PORT="" RCON_PORT="" ONLINE_MODE=""
+SERVER_TYPE="" VERSION="" MEMORY_MB="" PORT="" RCON_PORT="" ONLINE_MODE="" WHITELIST=""
 NEW_WORLD=false SERVICES=true ACCEPT_EULA=false YES=false
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -43,6 +44,7 @@ while [ "$#" -gt 0 ]; do
         --port) PORT="${2:?}"; shift 2 ;;
         --rcon-port) RCON_PORT="${2:?}"; shift 2 ;;
         --online-mode) ONLINE_MODE="${2:?}"; shift 2 ;;
+        --whitelist) WHITELIST="${2:?}"; shift 2 ;;
         --new-world) NEW_WORLD=true; shift ;;
         --no-services) SERVICES=false; shift ;;
         --accept-eula) ACCEPT_EULA=true; shift ;;
@@ -76,6 +78,7 @@ BACKUP_KEEP="$(env_value BACKUP_KEEP)"
 
 [[ "$SERVER_TYPE" =~ ^(paper|fabric)$ ]] || fail "--server must be paper or fabric"
 [[ "$ONLINE_MODE" =~ ^(true|false)$ ]] || fail "--online-mode must be true or false"
+[[ "$WHITELIST" =~ ^(|on|off)$ ]] || fail "--whitelist must be on or off"
 if ! [[ "$MEMORY_MB" =~ ^[0-9]+$ ]] || (( MEMORY_MB < 1024 )); then
     fail "--memory must be at least 1024"
 fi
@@ -187,6 +190,14 @@ if [ ! -f "$SERVER_DIR/server.properties" ]; then
     printf '%s\n' "motd=Raspberry Pi Minecraft Server" "max-players=10" \
         "view-distance=8" "simulation-distance=6" > "$SERVER_DIR/server.properties"
 fi
+# Minecraft 26.x turns the whitelist on for new servers, which locks everyone
+# out of an empty list. Set it explicitly once; afterwards only --whitelist
+# changes it, so `whitelist on` from the console survives reruns.
+grep -q '^white-list=' "$SERVER_DIR/server.properties" || WHITELIST="${WHITELIST:-off}"
+case "$WHITELIST" in
+    on) set_property white-list true ;;
+    off) set_property white-list false ;;
+esac
 set_property server-port "$PORT"
 set_property enable-rcon true
 set_property rcon.port "$RCON_PORT"

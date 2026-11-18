@@ -41,6 +41,7 @@ Run `./install.sh --help` for all options. Useful ones:
 | `--version 26.3` | Minecraft version |
 | `--memory 4096` | Maximum Java heap in MiB |
 | `--online-mode false` | Allow players without official accounts (see Security) |
+| `--whitelist on\|off` | Only let listed players join; new installs start with it off |
 | `--new-world` | Move the current world to `backups/old-worlds/` and start fresh |
 
 Everything the installer creates (`.env`, `server/`, `backups/`, `.venv/`) is
@@ -154,3 +155,6 @@ sudo systemctl start minecraft
 - With `--online-mode false`, the server doesn't check accounts, so anyone can join
   with any username, including an operator's. Keep the operator list short, or
   use a whitelist or an authentication mod if the server is public.
+- Whitelist from the console, no restart needed:
+  `.venv/bin/python -m minecraft_manager rcon whitelist add NAME`, then
+  `... rcon whitelist on`.
