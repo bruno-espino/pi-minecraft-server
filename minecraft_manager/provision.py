@@ -131,7 +131,10 @@ def resolve_addons(projects, server_type, version, lookup=None, project_info=Non
         seen.add(info["id"])
         if info["id"] in chosen:
             continue
-        if info.get("server_side") == "unsupported":
+        if info.get("server_side") == "unsupported" and required_by is None:
+            # Only skip client-only mods that were listed directly. A required
+            # dependency is installed regardless: Fabric refuses to start when
+            # a declared dependency is missing, whatever Modrinth's label says.
             print(f"  skip {info['title']}: client-only, players install it themselves")
             continue
         record = lookup(info["id"], server_type, version)

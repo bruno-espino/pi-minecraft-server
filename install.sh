@@ -230,7 +230,8 @@ if [ "$SERVICES" = true ]; then
     sudo install -m 440 "$rules" /etc/sudoers.d/minecraft
     rm -f "$rules"
     sudo systemctl daemon-reload
-    sudo systemctl enable --quiet minecraft.service minecraft-manager.service minecraft-backup.timer
+    sudo systemctl enable --quiet minecraft.service minecraft-manager.service
+    sudo systemctl enable --now --quiet minecraft-backup.timer
     sudo systemctl restart minecraft-manager.service
     if systemctl is-active --quiet minecraft; then
         echo "Minecraft is running the previous setup; restart it when nobody is playing:"
