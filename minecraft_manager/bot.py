@@ -71,7 +71,9 @@ def create_bot(config):
     @bot.command(name="status")
     async def status(ctx):
         if not await asyncio.to_thread(server.is_running):
-            await ctx.send(f"**{config.server_label}** is **offline**. Use `!up` to start it.")
+            await ctx.send(
+                f"**{config.server_label}** is **offline**. Use `!up` to start it, then connect to {await address()}"
+            )
             return
         players = await asyncio.to_thread(server.get_players, config)
         if players is None:

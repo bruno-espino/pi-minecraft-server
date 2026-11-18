@@ -13,4 +13,16 @@ krypton
 spark
 chunky
 
-# Gameplay mods from the group's list go below. Players need the same ones.
+# Gameplay mods (the group's list, 2026-11-17). Players need these (except
+# GetSpawners, which is server-only) plus Fusion
+# (connected textures, required by Rechiseled); install.sh skips Fusion here
+# because it only runs on clients. Sodium is client-only and optional.
+advanced-netherite
+dis-enchanting-table
+getspawners
+toms-storage
+rechiseled
+packed-up-backpacks
+natures-compass
+jei
+sodium
