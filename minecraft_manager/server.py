@@ -1,6 +1,8 @@
 """Blocking helpers for the Minecraft systemd unit and its RCON console."""
 
 from dataclasses import dataclass
+import json
+from pathlib import Path
 import re
 import subprocess
 import time
@@ -9,6 +11,7 @@ import urllib.request
 from .config import SERVICE
 from .rcon import RCONClient, RCONError, strip_formatting
 
+SERVER_DIR = Path(__file__).resolve().parent.parent / "server"
 _address_cache = (0.0, "")
 
 
@@ -86,6 +89,41 @@ def stop_for_inactivity(config):
         ["sudo", "-n", "systemctl", "stop", SERVICE], capture_output=True, text=True, timeout=120
     )
     return result.returncode == 0
+
+
+def client_mods():
+    """The players' mod summary and pack path written by install.sh, or (None, None)."""
+    try:
+        summary = json.loads((SERVER_DIR / "client-mods.json").read_text())
+    except (OSError, ValueError):
+        return None, None
+    pack = SERVER_DIR / "client-pack.mrpack"
+    return summary, pack if pack.is_file() else None
+
+
+def format_mods_message(config, summary, limit=1900):
+    """Discord text explaining what players install; stays under Discord's 2000 characters."""
+    if config.server_type != "fabric":
+        return f"**{config.server_label}** needs no mods: a normal Minecraft {config.minecraft_version} client works."
+    if not summary:
+        return "The mod list isn't available yet; ask the admin to rerun ./install.sh."
+
+    def names(group):
+        return ", ".join(f"[{m['title']}](<{m['url']}>)" for m in summary[group]) or "none"
+
+    text = (
+        f"**Mods for {config.server_label}**\n"
+        "Easiest: import the attached pack in the **Modrinth App** or **Prism Launcher** "
+        "(Add instance → Import); it installs Fabric and the exact versions.\n"
+        f"Manual install: Fabric Loader {summary['loader']} for Minecraft {summary['minecraft']}, then:\n"
+        f"**Required:** {names('required')}\n"
+        f"**Optional:** {names('optional')}"
+    )
+    if len(text) > limit:  # drop links before dropping mods
+        def plain(group):
+            return ", ".join(m["title"] for m in summary[group]) or "none"
+        text = text.split("**Required:**")[0] + f"**Required:** {plain('required')}\n**Optional:** {plain('optional')}"
+    return text[:limit]
 
 
 def public_address(config):

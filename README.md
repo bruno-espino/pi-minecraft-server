@@ -60,9 +60,17 @@ has no build for that version. It skips client-only mods you list directly
 (Sodium, shaders, minimaps) but always installs required dependencies, and removes mods it installed earlier that are no longer listed. Jars you add by
 hand are left alone.
 
-Players need Fabric and the same gameplay mods as the server. Sharing a Modrinth
-modpack or a Prism Launcher instance is easier than sending a list. The
-performance mods in the example (Lithium, FerriteCore, Krypton) are server-only.
+Players need Fabric and the same gameplay mods as the server. For Fabric,
+`install.sh` also writes a player modpack, `server/client-pack.mrpack`, with the
+exact versions the server runs, and the Discord bot shares it with `!mods`.
+Players import it in the Modrinth App or Prism Launcher. The pack only lists
+Modrinth download links and hashes, so it's a few KB and redistributes no mod files.
+
+- **Required in the pack:** mods that run on both sides (blocks, items) and
+  everything they depend on, such as Fabric API and libraries.
+- **Optional:** client-only mods you list (Sodium) and mods tagged `client` in
+  `mods.txt`, for example `jei client`.
+- **Left out:** server-only mods and performance mods like Lithium.
 
 Restart the server after changing mods: `sudo systemctl restart minecraft`.
 
@@ -71,13 +79,14 @@ Restart the server after changing mods: `sudo systemctl restart minecraft`.
 Create an application in the
 [Discord Developer Portal](https://discord.com/developers/applications), add a
 bot, enable **Message Content Intent**, and invite it with View Channels, Send
-Messages and Read Message History.
+Messages, Read Message History and Attach Files (for the `!mods` pack).
 
 | Command | Does |
 |---|---|
 | `!up` | Starts the server and reports when it is ready |
 | `!status` | Online or offline, and who is playing |
 | `!ip` | Connection address |
+| `!mods` | Mods players need, with the modpack attached (Fabric) |
 | `!help` | Command list |
 
 Set `NOTIFICATION_CHANNEL_ID` in `.env` to post a message when the server shuts

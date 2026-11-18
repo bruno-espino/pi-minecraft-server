@@ -4,6 +4,10 @@
 # ./install.sh. It downloads the newest build for the configured Minecraft
 # version plus required dependencies, and stops if a mod has no build for it.
 # Client-only mods you list (e.g. sodium) are skipped on the server.
+#
+# install.sh also builds server/client-pack.mrpack for players (shared by the
+# Discord bot's !mods). Mods both sides need are worked out automatically; add
+# "client" after a name to also offer an optional mod, e.g. "jei client".
 
 # Performance (server-side only; players don't need these)
 fabric-api

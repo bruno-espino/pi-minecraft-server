@@ -2,7 +2,7 @@ import unittest
 
 from minecraft_manager.config import Config
 from minecraft_manager.idle import IdleTracker
-from minecraft_manager.server import Players, parse_player_list
+from minecraft_manager.server import Players, format_mods_message, parse_player_list
 
 MINUTE = 60
 
@@ -66,6 +66,37 @@ class PlayerListTests(unittest.TestCase):
     def test_unrecognised(self):
         self.assertIsNone(parse_player_list("Unknown command"))
         self.assertIsNone(parse_player_list(""))
+
+
+class ModsMessageTests(unittest.TestCase):
+    SUMMARY = {
+        "minecraft": "26.3", "loader": "0.20.1",
+        "required": [{"title": "Fabric API", "url": "https://modrinth.com/mod/fabric-api", "version": "1"}],
+        "optional": [],
+    }
+
+    def config(self, server_type):
+        return Config.from_env({"RCON_PASSWORD": "x", "SERVER_TYPE": server_type, "MINECRAFT_VERSION": "26.3"})
+
+    def test_paper_needs_no_mods(self):
+        self.assertIn("needs no mods", format_mods_message(self.config("paper"), None))
+
+    def test_fabric_lists_mods_with_links(self):
+        text = format_mods_message(self.config("fabric"), self.SUMMARY)
+        self.assertIn("**Required:** [Fabric API](<https://modrinth.com/mod/fabric-api>)", text)
+        self.assertIn("**Optional:** none", text)
+        self.assertIn("Fabric Loader 0.20.1", text)
+
+    def test_long_lists_drop_links_and_fit_discord(self):
+        many = dict(self.SUMMARY, required=[
+            {"title": f"Mod {n}", "url": f"https://modrinth.com/mod/mod-{n}", "version": "1"} for n in range(60)
+        ])
+        text = format_mods_message(self.config("fabric"), many)
+        self.assertLessEqual(len(text), 1900)
+        self.assertNotIn("https://", text.split("**Required:**")[1])
+
+    def test_missing_summary(self):
+        self.assertIn("rerun ./install.sh", format_mods_message(self.config("fabric"), None))
 
 
 class ConfigTests(unittest.TestCase):
