@@ -13,8 +13,9 @@ checkout at `~/pi-minecraft-server`.
   - `idle.py` pure idle logic using `time.monotonic()` (the Pi has no RTC battery, so the wall clock jumps at boot)
   - `provision.py` stdlib-only downloads for `install.sh` (Paper, Fabric, Modrinth, Mojang Java version)
 - `templates/`: systemd units and `start.sh`; `__USER__`/`__DIR__` are filled in by `install.sh`
-- `mods.txt` / `plugins.txt`: Modrinth project names
-- Generated and ignored: `.env`, `server/`, `backups/`, `.venv/`
+- `mods.example.txt` / `plugins.example.txt`: shared defaults (performance mods and tools only)
+- Generated and ignored: `.env`, `server/`, `backups/`, `.venv/`, and the local
+  `mods.txt` / `plugins.txt` each install edits (pi1's holds the group's mods; never commit it)
 
 ## Rules
 

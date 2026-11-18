@@ -50,6 +50,10 @@ ignored by git, so updating is `git pull && ./install.sh`.
 
 List Modrinth project names (from `https://modrinth.com/mod/<name>`) in
 `mods.txt` for Fabric or `plugins.txt` for Paper, then rerun `./install.sh`.
+The first install creates these from `mods.example.txt` and
+`plugins.example.txt`, which hold only server-side performance mods and
+tools. Your lists are not tracked by git, so `git pull` never changes your
+choices, and `backup.sh` includes them in each backup.
 For each project it downloads the newest build for your Minecraft version,
 checks its hash, and adds required dependencies. It stops with a list if any mod
 has no build for that version. It skips client-only mods you list directly
@@ -58,7 +62,7 @@ hand are left alone.
 
 Players need Fabric and the same gameplay mods as the server. Sharing a Modrinth
 modpack or a Prism Launcher instance is easier than sending a list. The
-performance mods in `mods.txt` (Lithium, FerriteCore, Krypton) are server-only.
+performance mods in the example (Lithium, FerriteCore, Krypton) are server-only.
 
 Restart the server after changing mods: `sudo systemctl restart minecraft`.
 
@@ -130,7 +134,7 @@ sudo systemctl start minecraft
   `AUTO_SHUTDOWN=false` until it finishes. Vanilla and Fabric pause an empty
   server after a minute; if pregeneration stalls, set
   `pause-when-empty-seconds=-1` in `server.properties` while it runs.
-- **Profiling:** `spark` is in `mods.txt` and built into Paper. Use
+- **Profiling:** `spark` is in `mods.example.txt` and built into Paper. Use
   `/spark profiler` or `/spark tps` in game.
 - Keep the Pi cool: it reports throttling with `vcgencmd get_throttled`.
 

@@ -24,7 +24,8 @@ Usage: ./install.sh [options]
   -h, --help                Show this help
 
 Mods (Fabric) and plugins (Paper) come from Modrinth project names listed in
-mods.txt and plugins.txt. DISCORD_TOKEN can be passed as an environment variable.
+mods.txt and plugins.txt, created from the .example.txt files on first install.
+DISCORD_TOKEN can be passed as an environment variable.
 EOF
 }
 
@@ -88,7 +89,7 @@ done
 LEVEL=""
 [ ! -f "$SERVER_DIR/server.properties" ] || LEVEL="$(sed -n 's/^level-name=//p' "$SERVER_DIR/server.properties" | tail -1)"
 LEVEL="${LEVEL:-world}"
-[[ "$LEVEL" =~ ^[A-Za-z0-9._-]+$ ]] || fail "unsupported level-name: $LEVEL"
+[[ "$LEVEL" =~ ^[A-Za-z0-9._][A-Za-z0-9._-]*$ ]] || fail "unsupported level-name: $LEVEL"
 WORLD_EXISTS=false
 [ ! -f "$SERVER_DIR/$LEVEL/level.dat" ] || WORLD_EXISTS=true
 if [ "$WORLD_EXISTS" = true ] && [ -n "$PREVIOUS_TYPE" ] && [ "$PREVIOUS_TYPE" != "$SERVER_TYPE" ] &&
@@ -127,6 +128,7 @@ fi
 
 ADDON_LIST="$DIR/plugins.txt" ADDON_DIR="$SERVER_DIR/plugins"
 [ "$SERVER_TYPE" = paper ] || { ADDON_LIST="$DIR/mods.txt"; ADDON_DIR="$SERVER_DIR/mods"; }
+ADDON_EXAMPLE="${ADDON_LIST%.txt}.example.txt"
 cat <<EOF
 
   Directory      $DIR
@@ -196,6 +198,10 @@ chmod 600 "$SERVER_DIR/server.properties"
 echo "eula=true" > "$SERVER_DIR/eula.txt"
 
 (cd "$DIR" && python3 -m minecraft_manager.provision server-jar "$SERVER_TYPE" "$VERSION" "$SERVER_DIR")
+if [ ! -f "$ADDON_LIST" ] && [ -f "$ADDON_EXAMPLE" ]; then
+    cp "$ADDON_EXAMPLE" "$ADDON_LIST"
+    echo "Created $(basename "$ADDON_LIST") from $(basename "$ADDON_EXAMPLE"); edit it to choose your own"
+fi
 if [ -f "$ADDON_LIST" ]; then
     (cd "$DIR" && python3 -m minecraft_manager.provision addons "$SERVER_TYPE" "$VERSION" "$ADDON_LIST" "$ADDON_DIR")
 fi
