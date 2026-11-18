@@ -1,0 +1,6 @@
+# Paper plugins, as Modrinth project names (https://modrinth.com/plugin/<name>).
+# install.sh downloads the newest build for the configured Minecraft version.
+# Paper already includes the spark profiler.
+
+# Chunky (/chunky pregeneration)
+chunky

@@ -1,0 +1,26 @@
+[Unit]
+Description=Minecraft server
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=600
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=__USER__
+WorkingDirectory=__DIR__/server
+ExecStart=__DIR__/server/start.sh
+# Stop through the console so the world is saved; signals are the fallback.
+ExecStop=__DIR__/.venv/bin/python -m minecraft_manager stop $MAINPID
+# Restart after a crash; a normal stop (idle shutdown or systemctl stop) stays stopped.
+Restart=on-failure
+RestartSec=30
+KillSignal=SIGINT
+SuccessExitStatus=130 143
+TimeoutStopSec=120
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+# Enabled so the server comes back after a power cut; idle shutdown still applies.
+WantedBy=multi-user.target

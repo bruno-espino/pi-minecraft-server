@@ -1,0 +1,24 @@
+name: Test
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Unit tests
+        run: uv run --frozen python -m unittest discover -s tests -v
+      - name: Shell scripts
+        run: |
+          bash -n install.sh backup.sh templates/start.sh
+          shellcheck install.sh backup.sh
+      - name: systemd units
+        run: |
+          for unit in templates/*.service templates/*.timer; do
+            sed -e "s|__USER__|$USER|g" -e "s|__DIR__|$PWD|g" "$unit" > "$RUNNER_TEMP/$(basename "$unit")"
+          done
+          touch .env && mkdir -p server .venv/bin && cp templates/start.sh server/start.sh
+          ln -sf "$(command -v python3)" .venv/bin/python
+          systemd-analyze verify "$RUNNER_TEMP"/*.service "$RUNNER_TEMP"/*.timer

@@ -1,0 +1,28 @@
+# Fabric mods for the server, as Modrinth project names (the last part of
+# https://modrinth.com/mod/<name>). install.sh downloads the newest build for the
+# configured Minecraft version, plus any required dependencies, and refuses to
+# continue if one is missing. Client-only mods are skipped automatically.
+
+# Performance (server-side only; players don't need these)
+fabric-api
+lithium
+ferrite-core
+krypton
+
+# Tools: spark (/spark profiler) and Chunky (/chunky pregeneration)
+spark
+chunky
+
+# Gameplay mods (the group's list, 2026-11-17). Players need these (except
+# GetSpawners, which is server-only) plus Fusion
+# (connected textures, required by Rechiseled); install.sh skips Fusion here
+# because it only runs on clients. Sodium is client-only and optional.
+advanced-netherite
+dis-enchanting-table
+getspawners
+toms-storage
+rechiseled
+packed-up-backpacks
+natures-compass
+jei
+sodium

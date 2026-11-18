@@ -1,0 +1,10 @@
+[Unit]
+Description=Back up the Minecraft world
+
+[Service]
+Type=oneshot
+User=__USER__
+WorkingDirectory=__DIR__
+ExecStart=__DIR__/backup.sh
+Nice=10
+IOSchedulingClass=idle
