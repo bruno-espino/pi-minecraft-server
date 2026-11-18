@@ -179,7 +179,13 @@ def resolve_addons(entries, server_type, version, lookup=None, project_info=None
     # required dependency is always installed: Fabric refuses to start when a
     # declared dependency is missing, whatever Modrinth's label says.
     server = closure(i for i, _ in roots if side(i, "server_side") != "unsupported")
-    required = closure(i for i in server if side(i, "client_side") == "required")
+    # Players need what the untagged server mods need on clients. A `client`
+    # tag makes a mod optional for players even when Modrinth says clients
+    # require it (a minimap), unless an untagged mod depends on it.
+    untagged = closure(
+        i for i, tags in roots if side(i, "server_side") != "unsupported" and "client" not in tags
+    )
+    required = closure(i for i in untagged if side(i, "client_side") == "required")
     optional = closure(
         i for i, tags in roots if side(i, "server_side") == "unsupported" or "client" in tags
     ) - required
