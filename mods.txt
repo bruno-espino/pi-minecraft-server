@@ -25,3 +25,7 @@ packed-up-backpacks
 natures-compass
 jei
 sodium
+
+# Fell a whole tree by breaking its bottom log (requested 2026-11-17).
+# Server-side; players don't need it.
+fallingtree
