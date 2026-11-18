@@ -7,7 +7,8 @@
 #
 # install.sh also builds server/client-pack.mrpack for players (shared by the
 # Discord bot's !mods). Mods both sides need are worked out automatically; add
-# "client" after a name to also offer an optional mod, e.g. "jei client".
+# "client" after a name to offer it to players as optional, e.g. "jei client"
+# (this also works for mods Modrinth marks as required on clients, like minimaps).
 
 # Performance (server-side only; players don't need these)
 fabric-api

@@ -70,7 +70,8 @@ Modrinth download links and hashes, so it's a few KB and redistributes no mod fi
 - **Required in the pack:** mods that run on both sides (blocks, items) and
   everything they depend on, such as Fabric API and libraries.
 - **Optional:** client-only mods you list (Sodium) and mods tagged `client` in
-  `mods.txt`, for example `jei client`.
+  `mods.txt`, for example `jei client`. The tag also makes a mod optional when
+  Modrinth marks it required on clients, such as a minimap.
 - **Left out:** server-only mods and performance mods like Lithium.
 
 Restart the server after changing mods: `sudo systemctl restart minecraft`.

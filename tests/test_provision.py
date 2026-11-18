@@ -22,6 +22,7 @@ PROJECTS = {p["id"]: p for p in [
     project("SPAWN", "GetSpawners", "required", "unsupported"),  # server-only
     project("LITH", "Lithium", "optional", "optional"),
     project("OLD", "Old Mod", "required", "required"),
+    project("MAP", "Minimap", "optional", "required"),            # clients "require" it, but it's personal
 ]}
 SLUGS = {p["slug"]: p for p in PROJECTS.values()}
 
@@ -50,6 +51,7 @@ VERSIONS = {
     "CFG": version("cfg-1"),
     "SPAWN": version("spawn-1"),
     "LITH": version("lith-1"),
+    "MAP": version("map-1", ["API"]),
 }
 
 
@@ -90,6 +92,12 @@ class ResolveTests(unittest.TestCase):
 
     def test_optional_player_mods_are_client_only_or_tagged(self):
         self.assertEqual(titles(self.result, "optional"), ["JEI", "MezzConfig", "Sodium"])
+
+    def test_client_tag_makes_a_client_required_mod_optional(self):
+        result = resolve("toms-storage", "minimap client")
+        self.assertEqual(titles(result, "server"), ["Fabric API", "Minimap", "Toms Storage"])
+        self.assertEqual(titles(result, "required"), ["Fabric API", "Toms Storage"])
+        self.assertEqual(titles(result, "optional"), ["Minimap"])
 
     def test_no_problems(self):
         self.assertEqual((self.result["problems"], self.result["warnings"]), ([], []))
