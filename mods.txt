@@ -14,9 +14,8 @@ spark
 chunky
 
 # Gameplay mods (the group's list, 2026-11-17). Players need these (except
-# GetSpawners, which is server-only) plus Fusion
-# (connected textures, required by Rechiseled); install.sh skips Fusion here
-# because it only runs on clients. Sodium is client-only and optional.
+# GetSpawners, which is server-only) plus Fusion, which Rechiseled pulls in.
+# Sodium is client-only and optional; install.sh skips it here.
 advanced-netherite
 dis-enchanting-table
 getspawners

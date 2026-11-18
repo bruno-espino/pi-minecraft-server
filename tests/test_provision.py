@@ -10,6 +10,8 @@ PROJECTS = {
     "chunky": {"id": "fALzjamp", "title": "Chunky", "server_side": "required"},
     "sodium": {"id": "AANobbMI", "title": "Sodium", "server_side": "unsupported"},
     "old-mod": {"id": "OLD", "title": "Old Mod", "server_side": "optional"},
+    "rechiseled": {"id": "REC", "title": "Rechiseled", "server_side": "required"},
+    "FUS": {"id": "FUS", "title": "Fusion", "server_side": "unsupported"},
 }
 
 
@@ -29,6 +31,8 @@ def version(number, dependencies=()):
 VERSIONS = {
     "P7dR8mSH": version("0.166.2"),
     "fALzjamp": version("1.5.66", dependencies=["P7dR8mSH"]),
+    "REC": version("1.2.6", dependencies=["FUS"]),
+    "FUS": version("1.2.12"),
 }
 
 
@@ -60,6 +64,13 @@ class ResolveAddonsTests(unittest.TestCase):
     def test_client_only_mod_is_skipped(self):
         chosen, problems = self.resolve(["sodium"])
         self.assertEqual((chosen, problems), ({}, []))
+
+    def test_client_only_dependency_is_still_installed(self):
+        # Rechiseled requires Fusion on the server even though Modrinth marks
+        # Fusion client-only; Fabric refuses to start without it.
+        chosen, problems = self.resolve(["rechiseled"])
+        self.assertEqual(problems, [])
+        self.assertIn("FUS", chosen)
 
     def test_missing_build_is_reported(self):
         _, problems = self.resolve(["old-mod"])

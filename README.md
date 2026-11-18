@@ -52,8 +52,8 @@ List Modrinth project names (from `https://modrinth.com/mod/<name>`) in
 `mods.txt` for Fabric or `plugins.txt` for Paper, then rerun `./install.sh`.
 For each project it downloads the newest build for your Minecraft version,
 checks its hash, and adds required dependencies. It stops with a list if any mod
-has no build for that version. It skips client-only mods (shaders, minimaps),
-and removes mods it installed earlier that are no longer listed. Jars you add by
+has no build for that version. It skips client-only mods you list directly
+(Sodium, shaders, minimaps) but always installs required dependencies, and removes mods it installed earlier that are no longer listed. Jars you add by
 hand are left alone.
 
 Players need Fabric and the same gameplay mods as the server. Sharing a Modrinth
