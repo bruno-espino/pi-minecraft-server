@@ -36,3 +36,10 @@
   `plugins.txt`) created from `mods.example.txt` / `plugins.example.txt`, so
   the shared repo only suggests server-side defaults. Backups include them.
   pi1's list holds the group's mods plus FallingTree.
+
+## 2026-11-18: whitelist default
+
+- Minecraft 26.3 writes `white-list=true` for new servers, so the first player
+  on pi1 was refused by an empty whitelist. Turned it off there (as the old
+  server had it), and `install.sh` now writes the setting explicitly on new
+  installs, with `--whitelist on|off` to change it later.
