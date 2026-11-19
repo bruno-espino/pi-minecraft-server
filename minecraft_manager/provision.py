@@ -416,9 +416,10 @@ def addons(server_type, version, list_file, target_dir, *flags):
     target.mkdir(parents=True, exist_ok=True)
     entries = read_list(list_file)
     lock = Path(list_file).with_suffix(".lock")
-    pins = {} if "--update" in flags else read_lock(lock, server_type, version)
-    if not pins and not lock.exists() and "--update" not in flags:
-        pins = installed_versions(target, target.parent)
+    locked = read_lock(lock, server_type, version)
+    if not locked and not lock.exists():
+        locked = installed_versions(target, target.parent)
+    pins = {} if "--update" in flags else locked
     action = "Updating" if "--update" in flags else "Resolving"
     print(f"{action} {len(entries)} {server_type} add-ons for {version} from {Path(list_file).name}")
     resolution = resolve_addons(entries, server_type, version, lookup=pinned_lookup(pins))
@@ -438,8 +439,8 @@ def addons(server_type, version, list_file, target_dir, *flags):
         if not (path.is_file() and hashlib.sha512(path.read_bytes()).hexdigest() == file["hashes"]["sha512"]):
             write_verified(fetch(file["url"], timeout=300), path, sha512=file["hashes"]["sha512"])
         note = "" if record["version_type"] == "release" else f" ({record['version_type']})"
-        if pins and pins.get(node_id) != record.get("id"):
-            note += " (new)" if node_id not in pins else " (updated)"
+        if locked and locked.get(node_id) != record.get("id"):
+            note += " (new)" if node_id not in locked else " (updated)"
         print(f"  {title} {record['version_number']}{note}")
         managed[file["filename"]] = {"title": title, "version": record["version_number"]}
 
