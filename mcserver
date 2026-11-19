@@ -34,8 +34,14 @@ value() { [ ! -f "$2" ] || sed -n "s/^$1=//p" "$2" | tail -1; }
 env_value() { value "$1" "$DIR/.env"; }
 property() { value "$1" "$SERVER_DIR/server.properties"; }
 rcon() { "$PY" -m minecraft_manager rcon "$@"; }
-running() { systemctl is-active --quiet minecraft; }
-has_unit() { systemctl cat minecraft.service >/dev/null 2>&1; }
+# The minecraft service, if it runs this checkout (not another copy, or none
+# with --no-services).
+own_unit() {
+    local dir
+    dir="$(systemctl show -p WorkingDirectory --value minecraft 2>/dev/null)"
+    [ -n "$dir" ] && [ "$(readlink -f "$dir")" = "$(readlink -f "$SERVER_DIR")" ]
+}
+running() { own_unit && systemctl is-active --quiet minecraft; }
 confirm() {
     [ -t 0 ] || fail "$1 Run it from a terminal to confirm."
     local reply
@@ -56,7 +62,7 @@ wait_ready() {
 }
 
 start_server() {
-    has_unit || fail "no minecraft service (installed with --no-services); run server/start.sh"
+    own_unit || fail "the minecraft service does not run this copy (installed with --no-services?); use server/start.sh"
     if running; then echo "The server is already running."; return; fi
     echo "Starting the server..."
     sudo -n systemctl start minecraft || sudo systemctl start minecraft
@@ -64,6 +70,7 @@ start_server() {
 }
 
 stop_server() {
+    own_unit || fail "the minecraft service does not run this copy (installed with --no-services?)"
     running || { echo "The server is not running."; return; }
     local count
     count="$(player_count)"
@@ -112,8 +119,11 @@ status() {
         rss="$(sed -n 's/^VmRSS:[[:space:]]*\([0-9]*\) kB/\1/p' "/proc/$pid/status" 2>/dev/null || true)"
         [ -z "$rss" ] || printf '%-11s %s MiB used by the server (heap up to %s MiB)\n' \
             Memory "$(( rss / 1024 ))" "$(env_value MEMORY_MB)"
-    else
+    elif own_unit; then
         printf '%-11s stopped (%s %s)\n' Server "$type" "$version"
+    else
+        printf '%-11s %s (%s %s, not a service: start it with server/start.sh)\n' Server \
+            "$(rcon list >/dev/null 2>&1 && echo running || echo "not running")" "$type" "$version"
     fi
     printf '%-11s %s MiB of %s MiB available\n' RAM \
         "$(( $(sed -n 's/^MemAvailable: *\([0-9]*\) kB/\1/p' /proc/meminfo) / 1024 ))" \
@@ -245,7 +255,9 @@ update() {
     git pull --ff-only
     # Rerunning the installer also updates the server, mods and Java to their
     # newest builds for this Minecraft version.
-    ./install.sh --yes
+    local options=(--yes)
+    own_unit || options+=(--no-services)
+    ./install.sh "${options[@]}"
     if [ -n "$before" ] && [ "$before" != "$(sha256sum < "$pack")" ]; then
         echo "The player modpack changed: players need to import it again (!mods in Discord)."
     fi
