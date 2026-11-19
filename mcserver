@@ -25,7 +25,8 @@ Usage: mcserver COMMAND
                           so exploring doesn't lag. WORLD: overworld (default), nether, end.
                           Idle shutdown waits until it finishes.
   pregen status | stop    Pregeneration progress, or cancel it
-  update                  Download the latest version of this project and reinstall
+  update [--mods]         Update this project, the server and Java; --mods also moves
+                          mods/plugins to their newest builds (players then need the new pack)
 EOF
 }
 
@@ -253,10 +254,15 @@ update() {
     local pack="$SERVER_DIR/client-mods.json" before=""
     [ ! -f "$pack" ] || before="$(sha256sum < "$pack")"
     git pull --ff-only
-    # Rerunning the installer also updates the server, mods and Java to their
-    # newest builds for this Minecraft version.
+    # Rerunning the installer also updates the server and Java to their newest
+    # builds; mods stay at the versions in mods.lock unless --mods is given.
     local options=(--yes)
     own_unit || options+=(--no-services)
+    case "${1:-}" in
+        --mods) options+=(--update-mods) ;;
+        '') ;;
+        *) fail "usage: mcserver update [--mods]" ;;
+    esac
     ./install.sh "${options[@]}"
     if [ -n "$before" ] && [ "$before" != "$(sha256sum < "$pack")" ]; then
         echo "The player modpack changed: players need to import it again (!mods in Discord)."
@@ -268,7 +274,7 @@ command="$1"
 shift
 case "$command" in
     help|-h|--help) usage; exit 0 ;;
-    update) update; exit ;;
+    update) update "$@"; exit ;;
 esac
 [ -x "$PY" ] || fail "run ./install.sh first"
 case "$command" in

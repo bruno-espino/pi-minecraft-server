@@ -1,9 +1,16 @@
 from pathlib import Path
 import tempfile
 import unittest
+import unittest.mock
 import urllib.error
 
-from minecraft_manager.provision import client_pack, read_list, resolve_addons
+import hashlib
+import json
+import zipfile
+
+from minecraft_manager.provision import (
+    MANIFEST, client_pack, installed_versions, pinned_lookup, read_list, read_lock, resolve_addons, write_lock,
+)
 
 
 def project(project_id, title, server, client):
@@ -125,6 +132,54 @@ class ClientPackTests(unittest.TestCase):
         self.assertEqual([m["title"] for m in summary["required"]], ["Fabric API", "Toms Storage"])
         self.assertEqual([m["title"] for m in summary["optional"]], ["Sodium"])
         self.assertTrue(index["versionId"].startswith("26.3-"))
+
+
+class LockTests(unittest.TestCase):
+    def test_pinned_projects_keep_their_version_and_others_get_the_newest(self):
+        newest = lambda project, *_: {"id": f"{project}-newest"}
+        lookup = pinned_lookup({"API": "api-v1"}, fetch_version=lambda i: {"id": i}, newest=newest)
+        self.assertEqual(lookup("API", "fabric", "26.3"), {"id": "api-v1"})
+        self.assertEqual(lookup("LITH", "fabric", "26.3"), {"id": "LITH-newest"})
+
+    def test_a_pinned_version_removed_from_modrinth_falls_back_to_the_newest(self):
+        def gone(_id):
+            raise urllib.error.HTTPError("url", 404, "Not Found", {}, None)
+        lookup = pinned_lookup({"API": "api-v1"}, fetch_version=gone, newest=lambda *_: {"id": "api-v2"})
+        with unittest.mock.patch("builtins.print"):
+            self.assertEqual(lookup("API", "fabric", "26.3"), {"id": "api-v2"})
+
+    def test_lock_round_trip_and_other_versions_ignore_it(self):
+        resolution = {
+            "nodes": {"API": {"record": {"id": "api-v1"}}, "SOD": {"record": {"id": "sod-v1"}},
+                      "OLD": {"record": None}},
+            "server": {"API", "OLD"}, "required": {"API"}, "optional": {"SOD"},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            lock = Path(tmp) / "mods.lock"
+            write_lock(lock, resolution, "fabric", "26.3")
+            self.assertEqual(read_lock(lock, "fabric", "26.3"), {"API": "api-v1", "SOD": "sod-v1"})
+            self.assertEqual(read_lock(lock, "fabric", "26.4"), {})
+            self.assertEqual(read_lock(lock, "paper", "26.3"), {})
+            self.assertEqual(read_lock(Path(tmp) / "missing.lock", "fabric", "26.3"), {})
+
+    def test_first_lock_comes_from_installed_jars_and_the_player_pack(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            server, mods = Path(tmp), Path(tmp) / "mods"
+            mods.mkdir()
+            (mods / "api.jar").write_bytes(b"api")
+            (mods / "hand-added.jar").write_bytes(b"mine")  # not managed: ignored
+            (mods / MANIFEST).write_text(json.dumps({"api.jar": {}}))
+            with zipfile.ZipFile(server / "client-pack.mrpack", "w") as pack:
+                pack.writestr("modrinth.index.json", json.dumps({"files": [{"hashes": {"sha512": "f" * 128}}]}))
+            sent = []
+
+            def lookup_hashes(body):
+                sent.append(body)
+                return {hashlib.sha512(b"api").hexdigest(): {"project_id": "API", "id": "api-v1"},
+                        "f" * 128: {"project_id": "SOD", "id": "sod-v1"}}
+
+            self.assertEqual(installed_versions(mods, server, lookup_hashes), {"API": "api-v1", "SOD": "sod-v1"})
+            self.assertEqual(len(sent[0]["hashes"]), 2)
 
 
 if __name__ == "__main__":

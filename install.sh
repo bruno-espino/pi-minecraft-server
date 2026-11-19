@@ -23,6 +23,8 @@ Run without options for a guided setup; options skip their question.
   --world-type TYPE         World type for a new world: normal, large-biomes,
                             amplified, flat, or a mod's type such as wover:normal
   --new-world               Archive the current world so the next start makes a new one
+  --update-mods             Move mods or plugins to their newest builds (otherwise the
+                            versions in mods.lock / plugins.lock are kept)
   --no-services             Skip systemd units, sudo rules and the backup timer
   --accept-eula             Accept https://aka.ms/MinecraftEULA without asking
   --guided                  Ask about every setting, also when updating
@@ -71,7 +73,7 @@ auto_memory() {
 }
 
 SERVER_TYPE="" VERSION="" MEMORY_MB="" PORT="" RCON_PORT="" ONLINE_MODE="" WHITELIST="" WORLD_TYPE=""
-NEW_WORLD=false SERVICES=true ACCEPT_EULA=false YES=false GUIDED=false
+NEW_WORLD=false SERVICES=true ACCEPT_EULA=false YES=false GUIDED=false UPDATE_MODS=()
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --server) SERVER_TYPE="${2:?}"; shift 2 ;;
@@ -83,6 +85,7 @@ while [ "$#" -gt 0 ]; do
         --whitelist) WHITELIST="${2:?}"; shift 2 ;;
         --world-type) WORLD_TYPE="${2:?}"; shift 2 ;;
         --new-world) NEW_WORLD=true; shift ;;
+        --update-mods) UPDATE_MODS=(--update); shift ;;
         --no-services) SERVICES=false; shift ;;
         --accept-eula) ACCEPT_EULA=true; shift ;;
         --guided) GUIDED=true; shift ;;
@@ -407,7 +410,8 @@ echo "eula=true" > "$SERVER_DIR/eula.txt"
 
 (cd "$DIR" && python3 -m minecraft_manager.provision server-jar "$SERVER_TYPE" "$VERSION" "$SERVER_DIR")
 if [ -f "$ADDON_LIST" ]; then
-    (cd "$DIR" && python3 -m minecraft_manager.provision addons "$SERVER_TYPE" "$VERSION" "$ADDON_LIST" "$ADDON_DIR")
+    (cd "$DIR" && python3 -m minecraft_manager.provision addons "$SERVER_TYPE" "$VERSION" "$ADDON_LIST" "$ADDON_DIR" \
+        "${UPDATE_MODS[@]}")
 fi
 
 JAR="paper.jar"
