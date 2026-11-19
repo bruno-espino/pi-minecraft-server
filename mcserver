@@ -71,6 +71,10 @@ stop_server() {
         rcon list
         confirm "Stop the server with $count player(s) online?" || fail "cancelled"
     fi
+    if [ -f "$PREGEN_HOLD" ]; then
+        echo "Pregeneration stops too; run the same mcserver pregen command again later to finish it."
+        rm -f "$PREGEN_HOLD"
+    fi
     echo "Saving the world and stopping..."
     sudo -n systemctl stop minecraft || sudo systemctl stop minecraft
     echo "Stopped."
@@ -97,13 +101,15 @@ status() {
             if [ "$type" = paper ]; then
                 printf '%-11s %s\n' Tick "$(rcon tps 2>/dev/null | head -1)"
             else
-                printf '%-11s %s\n' Tick "$(rcon tick query 2>/dev/null | sed -n 's/^Average time per tick: //p')"
+                # "Average time per tick: 2.6ms (Target: 50.0ms)Percentiles: P50: 0.3ms P95: 1.0ms ..."
+                printf '%-11s %s\n' Tick "$(rcon tick query 2>/dev/null | tr '\n' ' ' |
+                    sed -n 's/.*Average time per tick: \([0-9.]*\)ms.*P95: \([0-9.]*\)ms.*/\1 ms average, \2 ms P95 (lag starts at 50 ms)/p')"
             fi
         else
             printf '%-11s %s\n' Players "(starting up, console not answering yet)"
         fi
         pid="$(systemctl show -p MainPID --value minecraft)"
-        rss="$(sed -n 's/^VmRSS: *\([0-9]*\) kB/\1/p' "/proc/$pid/status" 2>/dev/null || true)"
+        rss="$(sed -n 's/^VmRSS:[[:space:]]*\([0-9]*\) kB/\1/p' "/proc/$pid/status" 2>/dev/null || true)"
         [ -z "$rss" ] || printf '%-11s %s MiB used by the server (heap up to %s MiB)\n' \
             Memory "$(( rss / 1024 ))" "$(env_value MEMORY_MB)"
     else
@@ -112,9 +118,14 @@ status() {
     printf '%-11s %s MiB of %s MiB available\n' RAM \
         "$(( $(sed -n 's/^MemAvailable: *\([0-9]*\) kB/\1/p' /proc/meminfo) / 1024 ))" \
         "$(( $(sed -n 's/^MemTotal: *\([0-9]*\) kB/\1/p' /proc/meminfo) / 1024 ))"
-    local world size
+    local world size dir
     world="$(level)"
-    size="$(cd "$SERVER_DIR" && du -shc "$world" "${world}_nether" "${world}_the_end" 2>/dev/null | tail -1 | cut -f1)"
+    local dirs=()
+    for dir in "$world" "${world}_nether" "${world}_the_end"; do
+        [ ! -d "$SERVER_DIR/$dir" ] || dirs+=("$SERVER_DIR/$dir")
+    done
+    size=""
+    (( ${#dirs[@]} == 0 )) || size="$(du -shc "${dirs[@]}" | tail -1 | cut -f1)"
     printf '%-11s %s; %s free on disk\n' World "${size:-none yet}" "$(df -h --output=avail "$DIR" | tail -1 | tr -d ' ')"
     shopt -s nullglob
     local backups=("$DIR"/backups/world-*.tar.gz)
@@ -127,7 +138,7 @@ status() {
     local idle
     idle="after $(env_value IDLE_TIMEOUT_MINUTES) min without players"
     [ "$(env_value AUTO_SHUTDOWN)" != false ] || idle="off (AUTO_SHUTDOWN=false)"
-    [ ! -f "$PREGEN_HOLD" ] || idle="waiting for pregeneration to finish"
+    [ ! -f "$PREGEN_HOLD" ] || ! running || idle="waiting for pregeneration to finish"
     printf '%-11s %s\n' "Idle stop" "$idle"
     local lan
     lan="$(hostname -I 2>/dev/null | awk '{print $1}')"
@@ -137,8 +148,13 @@ status() {
         local temp throttled
         temp="$(vcgencmd measure_temp | sed 's/temp=//; s/'"'"'C/ °C/')"
         throttled="$(vcgencmd get_throttled | cut -d= -f2)"
-        printf '%-11s %s%s\n' Temperature "$temp" \
-            "$([ "$throttled" = 0x0 ] && echo ", no throttling" || echo ", throttled since boot ($throttled), check cooling")"
+        local note=", no throttling since boot"
+        if (( throttled & 0x10001 )); then
+            note=", under-voltage since boot ($throttled): use the official power supply"
+        elif (( throttled )); then
+            note=", throttled since boot ($throttled): improve the cooling"
+        fi
+        printf '%-11s %s%s\n' Temperature "$temp" "$note"
     elif [ -r /sys/class/thermal/thermal_zone0/temp ]; then
         printf '%-11s %s °C\n' Temperature "$(( $(cat /sys/class/thermal/thermal_zone0/temp) / 1000 ))"
     fi
@@ -224,8 +240,15 @@ pregen() {
 
 update() {
     cd "$DIR"
+    local pack="$SERVER_DIR/client-mods.json" before=""
+    [ ! -f "$pack" ] || before="$(sha256sum < "$pack")"
     git pull --ff-only
+    # Rerunning the installer also updates the server, mods and Java to their
+    # newest builds for this Minecraft version.
     ./install.sh --yes
+    if [ -n "$before" ] && [ "$before" != "$(sha256sum < "$pack")" ]; then
+        echo "The player modpack changed: players need to import it again (!mods in Discord)."
+    fi
 }
 
 [ "$#" -gt 0 ] || { usage; exit 0; }

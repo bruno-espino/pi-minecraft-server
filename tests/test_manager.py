@@ -1,3 +1,4 @@
+import asyncio
 from pathlib import Path
 import tempfile
 import unittest
@@ -151,6 +152,50 @@ class PregenTests(unittest.TestCase):
     def test_no_hold_means_no_pregeneration(self):
         with tempfile.TemporaryDirectory() as tmp:
             self.assertFalse(server.pregen_running(self.config, Path(tmp) / ".pregen"))
+
+
+class WatchIdleTests(unittest.TestCase):
+    def run_loop(self, pregen_states, players=0, timeout_minutes=0):
+        """Run watch_idle for one check per pregen state; returns (stops, notifications)."""
+        from minecraft_manager import app
+
+        config = Config(rcon_password="secret", idle_timeout_minutes=timeout_minutes)
+        states = iter(pregen_states)
+        sleeps = []
+
+        async def sleep(_seconds):
+            sleeps.append(1)
+            if len(sleeps) == len(pregen_states):
+                raise asyncio.CancelledError
+
+        notes = []
+
+        async def notify(message):
+            notes.append(message)
+
+        stop = mock.Mock(return_value=True)
+        with mock.patch.object(server, "is_running", return_value=True), \
+                mock.patch.object(server, "get_players", return_value=Players(players, [])), \
+                mock.patch.object(server, "pregen_running", side_effect=lambda config: next(states)), \
+                mock.patch.object(server, "stop_for_inactivity", stop), \
+                mock.patch.object(app.asyncio, "sleep", sleep), mock.patch.object(app, "log"):
+            with self.assertRaises(asyncio.CancelledError):
+                asyncio.run(app.watch_idle(config, notify))
+        return stop.call_count, notes
+
+    def test_pregeneration_holds_off_idle_shutdown_and_reports_the_end(self):
+        stops, notes = self.run_loop([True, True, False], timeout_minutes=0)
+        # With a zero timeout the server would stop at the first check; it waits
+        # for pregeneration and stops once, after reporting the end.
+        self.assertEqual(stops, 1)
+        self.assertEqual(len(notes), 2)
+        self.assertIn("Pregeneration finished", notes[0])
+        self.assertIn("Server shut down", notes[1])
+
+    def test_without_pregeneration_an_empty_server_stops(self):
+        stops, notes = self.run_loop([False], timeout_minutes=0)
+        self.assertEqual(stops, 1)
+        self.assertEqual(len(notes), 1)  # the shutdown message
 
 
 if __name__ == "__main__":
