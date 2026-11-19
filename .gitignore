@@ -1,7 +1,8 @@
-# Created by install.sh: secrets, the server, backups and the Python environment
+# Created by install.sh: secrets, the server, backups, Java and the Python environment
 .env
 server/
 backups/
+/java/
 .venv/
 # Your own mod and plugin lists (see mods.example.txt and plugins.example.txt)
 /mods.txt
