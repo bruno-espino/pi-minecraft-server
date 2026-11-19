@@ -15,6 +15,7 @@ async def watch_idle(config, notify=None):
     """Stop the server after IDLE_TIMEOUT_MINUTES with nobody online."""
     tracker = IdleTracker(config.idle_timeout_minutes * 60)
     last_state = None
+    pregen = False
     while True:
         try:
             running = await asyncio.to_thread(server.is_running)
@@ -24,6 +25,13 @@ async def watch_idle(config, notify=None):
             if state != last_state:
                 log(f"server {'running' if running else 'stopped'}, players: {'?' if count is None else count}")
                 last_state = state
+            was_pregen, pregen = pregen, running and await asyncio.to_thread(server.pregen_running, config)
+            if was_pregen != pregen:
+                log("pregeneration running; idle shutdown waits" if pregen else "pregeneration finished")
+                if not pregen and notify:
+                    await notify("**Pregeneration finished.** New terrain is ready to explore.")
+            if pregen and count is not None:
+                count = max(count, 1)  # counts as activity: the idle window starts when it ends
             if tracker.observe(running, count, time.monotonic()) and config.auto_shutdown:
                 log(f"no players for {config.idle_timeout_minutes} minutes; stopping the server")
                 stopped = await asyncio.to_thread(server.stop_for_inactivity, config)

@@ -2,6 +2,7 @@
 
     python -m minecraft_manager             run the manager (systemd runs this)
     python -m minecraft_manager rcon CMD    run one console command, e.g. `rcon list`
+    python -m minecraft_manager console     type console commands interactively
     python -m minecraft_manager stop [PID]  stop the server cleanly (systemd ExecStop)
 """
 
@@ -46,6 +47,33 @@ def stop_and_wait(config, pid, timeout=110):
         time.sleep(1)
 
 
+def console(config):
+    """A small interactive console over RCON (`mcserver console`)."""
+    from .rcon import RCONClient, RCONError, strip_formatting
+
+    try:
+        import readline  # noqa: F401  (line editing and history for input())
+    except ImportError:
+        pass
+    try:
+        with RCONClient("127.0.0.1", config.rcon_port, config.rcon_password) as rcon:
+            print("Server console. Type commands without the slash; Ctrl-D or `exit` leaves.")
+            while True:
+                try:
+                    line = input("> ").strip()
+                except (EOFError, KeyboardInterrupt):
+                    print()
+                    return
+                if line in ("exit", "quit"):
+                    return
+                if line:
+                    reply = strip_formatting(rcon.command(line.removeprefix("/")))
+                    if reply.strip():
+                        print(reply.rstrip())
+    except RCONError as error:
+        raise SystemExit(f"console unavailable: {error}") from error
+
+
 def main(argv):
     load_env_file()
     config = Config.from_env()
@@ -57,6 +85,9 @@ def main(argv):
                 print(strip_formatting(rcon.command(" ".join(argv[1:]))))
         except RCONError as error:
             raise SystemExit(str(error)) from error
+        return
+    if argv == ["console"]:
+        console(config)
         return
     if argv[:1] == ["stop"] and len(argv) <= 2:
         # systemd also runs ExecStop after the server exited by itself; then

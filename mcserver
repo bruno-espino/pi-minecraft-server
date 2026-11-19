@@ -1,0 +1,287 @@
+#!/bin/bash
+# Day-to-day commands for the server that install.sh set up. Run `mcserver help`.
+
+set -euo pipefail
+
+DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+SERVER_DIR="$DIR/server"
+PY="$DIR/.venv/bin/python"
+PREGEN_HOLD="$SERVER_DIR/.pregen"
+
+usage() {
+    cat <<'EOF'
+Usage: mcserver COMMAND
+
+  status                  Server state, players, performance, memory, disk and backups
+  start | stop | restart  Start or stop the server (stopping saves the world)
+  console                 Type server console commands interactively
+  cmd COMMAND...          Run one console command, e.g. mcserver cmd whitelist add Steve
+  logs [LINES]            Follow the server log
+  backup                  Back up the world now
+  backups                 List backups
+  restore [BACKUP]        Replace the world with a backup (default: the newest); the
+                          current world is kept in backups/old-worlds/
+  pregen RADIUS [WORLD]   Generate terrain up to RADIUS blocks from spawn ahead of play,
+                          so exploring doesn't lag. WORLD: overworld (default), nether, end.
+                          Idle shutdown waits until it finishes.
+  pregen status | stop    Pregeneration progress, or cancel it
+  update                  Download the latest version of this project and reinstall
+EOF
+}
+
+fail() { echo "Error: $*" >&2; exit 1; }
+value() { [ ! -f "$2" ] || sed -n "s/^$1=//p" "$2" | tail -1; }
+env_value() { value "$1" "$DIR/.env"; }
+property() { value "$1" "$SERVER_DIR/server.properties"; }
+rcon() { "$PY" -m minecraft_manager rcon "$@"; }
+# The minecraft service, if it runs this checkout (not another copy, or none
+# with --no-services).
+own_unit() {
+    local dir
+    dir="$(systemctl show -p WorkingDirectory --value minecraft 2>/dev/null)"
+    [ -n "$dir" ] && [ "$(readlink -f "$dir")" = "$(readlink -f "$SERVER_DIR")" ]
+}
+running() { own_unit && systemctl is-active --quiet minecraft; }
+confirm() {
+    [ -t 0 ] || fail "$1 Run it from a terminal to confirm."
+    local reply
+    read -r -p "$1 [y/N] " reply
+    [[ "$reply" =~ ^[Yy]$ ]]
+}
+player_count() { rcon list 2>/dev/null | sed -n 's/^There are \([0-9]*\).*/\1/p'; }
+level() { local name; name="$(property level-name)"; echo "${name:-world}"; }
+
+wait_ready() {
+    local _
+    for _ in $(seq 1 100); do
+        if rcon list >/dev/null 2>&1; then echo "The server is ready."; return 0; fi
+        running || fail "the server stopped while starting; see mcserver logs"
+        sleep 3
+    done
+    fail "the server did not answer within 5 minutes; see mcserver logs"
+}
+
+start_server() {
+    own_unit || fail "the minecraft service does not run this copy (installed with --no-services?); use server/start.sh"
+    if running; then echo "The server is already running."; return; fi
+    echo "Starting the server..."
+    sudo -n systemctl start minecraft || sudo systemctl start minecraft
+    wait_ready
+}
+
+stop_server() {
+    own_unit || fail "the minecraft service does not run this copy (installed with --no-services?)"
+    running || { echo "The server is not running."; return; }
+    local count
+    count="$(player_count)"
+    if [ "${count:-0}" -gt 0 ]; then
+        rcon list
+        confirm "Stop the server with $count player(s) online?" || fail "cancelled"
+    fi
+    if [ -f "$PREGEN_HOLD" ]; then
+        echo "Pregeneration stops too; run the same mcserver pregen command again later to finish it."
+        rm -f "$PREGEN_HOLD"
+    fi
+    echo "Saving the world and stopping..."
+    sudo -n systemctl stop minecraft || sudo systemctl stop minecraft
+    echo "Stopped."
+}
+
+human_duration() {
+    local s=$1
+    if (( s >= 86400 )); then echo "$((s / 86400))d $((s % 86400 / 3600))h"
+    elif (( s >= 3600 )); then echo "$((s / 3600))h $((s % 3600 / 60))m"
+    else echo "$((s / 60))m"; fi
+}
+
+status() {
+    local type version
+    type="$(env_value SERVER_TYPE)" version="$(env_value MINECRAFT_VERSION)"
+    if running; then
+        local since pid rss
+        since="$(systemctl show -p ActiveEnterTimestamp --value minecraft)"
+        printf '%-11s running for %s (%s %s)\n' Server \
+            "$(human_duration $(( $(date +%s) - $(date -d "$since" +%s) )))" "$type" "$version"
+        local players
+        if players="$(rcon list 2>/dev/null)"; then
+            printf '%-11s %s\n' Players "$(sed -n 's/^There are \([0-9]*\) of a max of \([0-9]*\) players online:\s*/\1 of \2 /p' <<<"$players")"
+            if [ "$type" = paper ]; then
+                printf '%-11s %s\n' Tick "$(rcon tps 2>/dev/null | head -1)"
+            else
+                # "Average time per tick: 2.6ms (Target: 50.0ms)Percentiles: P50: 0.3ms P95: 1.0ms ..."
+                printf '%-11s %s\n' Tick "$(rcon tick query 2>/dev/null | tr '\n' ' ' |
+                    sed -n 's/.*Average time per tick: \([0-9.]*\)ms.*P95: \([0-9.]*\)ms.*/\1 ms average, \2 ms P95 (lag starts at 50 ms)/p')"
+            fi
+        else
+            printf '%-11s %s\n' Players "(starting up, console not answering yet)"
+        fi
+        pid="$(systemctl show -p MainPID --value minecraft)"
+        rss="$(sed -n 's/^VmRSS:[[:space:]]*\([0-9]*\) kB/\1/p' "/proc/$pid/status" 2>/dev/null || true)"
+        [ -z "$rss" ] || printf '%-11s %s MiB used by the server (heap up to %s MiB)\n' \
+            Memory "$(( rss / 1024 ))" "$(env_value MEMORY_MB)"
+    elif own_unit; then
+        printf '%-11s stopped (%s %s)\n' Server "$type" "$version"
+    else
+        printf '%-11s %s (%s %s, not a service: start it with server/start.sh)\n' Server \
+            "$(rcon list >/dev/null 2>&1 && echo running || echo "not running")" "$type" "$version"
+    fi
+    printf '%-11s %s MiB of %s MiB available\n' RAM \
+        "$(( $(sed -n 's/^MemAvailable: *\([0-9]*\) kB/\1/p' /proc/meminfo) / 1024 ))" \
+        "$(( $(sed -n 's/^MemTotal: *\([0-9]*\) kB/\1/p' /proc/meminfo) / 1024 ))"
+    local world size dir
+    world="$(level)"
+    local dirs=()
+    for dir in "$world" "${world}_nether" "${world}_the_end"; do
+        [ ! -d "$SERVER_DIR/$dir" ] || dirs+=("$SERVER_DIR/$dir")
+    done
+    size=""
+    (( ${#dirs[@]} == 0 )) || size="$(du -shc "${dirs[@]}" | tail -1 | cut -f1)"
+    printf '%-11s %s; %s free on disk\n' World "${size:-none yet}" "$(df -h --output=avail "$DIR" | tail -1 | tr -d ' ')"
+    shopt -s nullglob
+    local backups=("$DIR"/backups/world-*.tar.gz)
+    if (( ${#backups[@]} )); then
+        local newest="${backups[${#backups[@]}-1]}"
+        printf '%-11s %s, newest %s (%s)\n' Backups "${#backups[@]}" "$(basename "$newest")" "$(du -h "$newest" | cut -f1)"
+    else
+        printf '%-11s none yet\n' Backups
+    fi
+    local idle
+    idle="after $(env_value IDLE_TIMEOUT_MINUTES) min without players"
+    [ "$(env_value AUTO_SHUTDOWN)" != false ] || idle="off (AUTO_SHUTDOWN=false)"
+    [ ! -f "$PREGEN_HOLD" ] || ! running || idle="waiting for pregeneration to finish"
+    printf '%-11s %s\n' "Idle stop" "$idle"
+    local lan
+    lan="$(hostname -I 2>/dev/null | awk '{print $1}')"
+    printf '%-11s %s:%s on your network%s\n' Address "${lan:-?}" "$(env_value MINECRAFT_PORT)" \
+        "$([ -z "$(env_value SERVER_ADDRESS)" ] || echo ", $(env_value SERVER_ADDRESS) from outside")"
+    if command -v vcgencmd >/dev/null; then
+        local temp throttled
+        temp="$(vcgencmd measure_temp | sed 's/temp=//; s/'"'"'C/ °C/')"
+        throttled="$(vcgencmd get_throttled | cut -d= -f2)"
+        local note=", no throttling since boot"
+        if (( throttled & 0x10001 )); then
+            note=", under-voltage since boot ($throttled): use the official power supply"
+        elif (( throttled )); then
+            note=", throttled since boot ($throttled): improve the cooling"
+        fi
+        printf '%-11s %s%s\n' Temperature "$temp" "$note"
+    elif [ -r /sys/class/thermal/thermal_zone0/temp ]; then
+        printf '%-11s %s °C\n' Temperature "$(( $(cat /sys/class/thermal/thermal_zone0/temp) / 1000 ))"
+    fi
+}
+
+list_backups() {
+    shopt -s nullglob
+    local backups=("$DIR"/backups/world-*.tar.gz)
+    (( ${#backups[@]} )) || { echo "No backups yet; run mcserver backup"; return; }
+    local backup
+    for backup in "${backups[@]}"; do
+        printf '%s  %s\n' "$(du -h "$backup" | cut -f1)" "$(basename "$backup")"
+    done
+}
+
+restore() {
+    shopt -s nullglob
+    local backups=("$DIR"/backups/world-*.tar.gz) archive="${1:-}"
+    if [ -z "$archive" ]; then
+        (( ${#backups[@]} )) || fail "no backups in backups/"
+        archive="${backups[${#backups[@]}-1]}"
+    elif [ ! -f "$archive" ] && [ -f "$DIR/backups/$archive" ]; then
+        archive="$DIR/backups/$archive"
+    fi
+    [ -f "$archive" ] || fail "no such backup: $archive (see mcserver backups)"
+    local world entries=()
+    world="$(level)"
+    echo "Checking $(basename "$archive")..."
+    mapfile -t entries < <(tar -tzf "$archive" | cut -d/ -f1 | sort -u |
+        grep -xF -e "$world" -e "${world}_nether" -e "${world}_the_end")
+    tar -tzf "$archive" "$world/level.dat" >/dev/null 2>&1 || fail "$(basename "$archive") has no $world/level.dat"
+    confirm "Replace the current world with $(basename "$archive")? The current one is moved to backups/old-worlds/." ||
+        fail "cancelled"
+    local was_running=false
+    if running; then was_running=true; stop_server; fi
+    local keep
+    keep="$DIR/backups/old-worlds/$(date +%Y%m%d-%H%M%S)-before-restore"
+    mkdir -p "$keep"
+    local dir
+    for dir in "$world" "${world}_nether" "${world}_the_end"; do
+        [ ! -e "$SERVER_DIR/$dir" ] || mv "$SERVER_DIR/$dir" "$keep/"
+    done
+    tar -xzf "$archive" -C "$SERVER_DIR" "${entries[@]}"
+    echo "Restored $(basename "$archive"); the previous world is in ${keep#"$DIR"/}"
+    [ "$was_running" = false ] || start_server
+}
+
+pregen() {
+    case "${1:-}" in
+        status) rcon chunky progress; return ;;
+        stop) rcon chunky cancel; rm -f "$PREGEN_HOLD"; return ;;
+        ''|*[!0-9]*) fail "usage: mcserver pregen RADIUS [overworld|nether|end], or pregen status|stop" ;;
+    esac
+    local radius="$1" dimension="${2:-overworld}" world
+    (( radius >= 16 && radius <= 30000000 )) || fail "the radius is in blocks, for example 2000"
+    local level_name
+    level_name="$(level)"
+    case "$dimension:$(env_value SERVER_TYPE)" in
+        overworld:paper) world="$level_name" ;;
+        nether:paper) world="${level_name}_nether" ;;
+        end:paper) world="${level_name}_the_end" ;;
+        overworld:*) world=minecraft:overworld ;;
+        nether:*) world=minecraft:the_nether ;;
+        end:*) world=minecraft:the_end ;;
+        *) fail "WORLD must be overworld, nether or end" ;;
+    esac
+    running || start_server
+    rcon chunky help 2>/dev/null | grep -q Chunky || fail "Chunky is not installed; add chunky to your mods.txt or plugins.txt and rerun ./install.sh"
+    touch "$PREGEN_HOLD"
+    rcon chunky world "$world" >/dev/null
+    rcon chunky spawn >/dev/null
+    rcon chunky radius "$radius" >/dev/null
+    local reply
+    reply="$(rcon chunky start)"
+    # An unfinished task for this world asks before starting over; generated
+    # chunks are skipped quickly, so starting over loses little.
+    case "$reply" in *"chunky confirm"*) reply="$(rcon chunky confirm)" ;; esac
+    echo "$reply"
+    local chunks=$(( (radius / 8 + 1) ** 2 ))
+    echo "About $chunks chunks to check. It runs inside the server, so you can log out; players"
+    echo "can join meanwhile. Follow it with: mcserver pregen status"
+}
+
+update() {
+    cd "$DIR"
+    local pack="$SERVER_DIR/client-mods.json" before=""
+    [ ! -f "$pack" ] || before="$(sha256sum < "$pack")"
+    git pull --ff-only
+    # Rerunning the installer also updates the server, mods and Java to their
+    # newest builds for this Minecraft version.
+    local options=(--yes)
+    own_unit || options+=(--no-services)
+    ./install.sh "${options[@]}"
+    if [ -n "$before" ] && [ "$before" != "$(sha256sum < "$pack")" ]; then
+        echo "The player modpack changed: players need to import it again (!mods in Discord)."
+    fi
+}
+
+[ "$#" -gt 0 ] || { usage; exit 0; }
+command="$1"
+shift
+case "$command" in
+    help|-h|--help) usage; exit 0 ;;
+    update) update; exit ;;
+esac
+[ -x "$PY" ] || fail "run ./install.sh first"
+case "$command" in
+    status) status ;;
+    start) start_server ;;
+    stop) stop_server ;;
+    restart) stop_server; start_server ;;
+    console) "$PY" -m minecraft_manager console ;;
+    cmd) [ "$#" -gt 0 ] || fail "usage: mcserver cmd COMMAND..."; rcon "$@" ;;
+    logs) tail -n "${1:-50}" -F "$SERVER_DIR/logs/latest.log" ;;
+    backup) "$DIR/backup.sh" ;;
+    backups) list_backups ;;
+    restore) restore "$@" ;;
+    pregen) pregen "$@" ;;
+    *) usage >&2; fail "unknown command: $command" ;;
+esac
