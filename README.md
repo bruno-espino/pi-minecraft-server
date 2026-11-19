@@ -42,7 +42,15 @@ Run `./install.sh --help` for all options. Useful ones:
 | `--memory 4096` | Maximum Java heap in MiB |
 | `--online-mode false` | Allow players without official accounts (see Security) |
 | `--whitelist on\|off` | Only let listed players join; new installs start with it off |
+| `--world-type normal` | World type for a new world: `normal`, `large-biomes`, `amplified`, `flat`, or a mod's type |
 | `--new-world` | Move the current world to `backups/old-worlds/` and start fresh |
+
+The world type is fixed when a world is created, so pick it before the first
+start (or together with `--new-world`). Some world-generation mods need their
+own type: BetterEnd and BetterNether only generate their terrain in a world made
+with `--world-type wover:normal`, whose overworld is the vanilla one, so they
+combine with overworld mods such as Terralith. The installer points this out
+when they are in `mods.txt`.
 
 Everything the installer creates (`.env`, `server/`, `backups/`, `.venv/`) is
 ignored by git, so updating is `git pull && ./install.sh`.
