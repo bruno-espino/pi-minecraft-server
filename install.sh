@@ -191,7 +191,8 @@ ADDON_LIST="$DIR/plugins.txt" ADDON_DIR="$SERVER_DIR/plugins"
 ADDON_EXAMPLE="${ADDON_LIST%.txt}.example.txt"
 if [ ! -f "$ADDON_LIST" ] && [ -f "$ADDON_EXAMPLE" ]; then
     cp "$ADDON_EXAMPLE" "$ADDON_LIST"
-    echo "Created $(basename "$ADDON_LIST") from $(basename "$ADDON_EXAMPLE"); edit it to choose your own"
+    [ "$GUIDED" = true ] ||
+        echo "Created $(basename "$ADDON_LIST") from $(basename "$ADDON_EXAMPLE"); edit it to choose your own"
 fi
 if [ "$GUIDED" = true ]; then
     kind=plugins
