@@ -8,6 +8,7 @@ sets everything up from there.
 
 - `install.sh`: the only setup entry point; idempotent, settings persist in `.env`
 - `backup.sh`: world backup with retention, run nightly by `minecraft-backup.timer`
+- `mcserver`: day-to-day commands (status, console, restore, pregen, update); linked to `/usr/local/bin`
 - `minecraft_manager/`: one Python process (`python -m minecraft_manager`)
   - `app.py` idle-shutdown loop; `bot.py` Discord commands; `server.py` systemd/RCON helpers
   - `idle.py` pure idle logic using `time.monotonic()` (the Pi has no RTC battery, so the wall clock jumps at boot)
@@ -33,7 +34,8 @@ sets everything up from there.
 
 ```bash
 uv run python -m unittest discover -s tests -v
-bash -n install.sh backup.sh
+bash -n install.sh backup.sh mcserver
+shellcheck install.sh backup.sh mcserver
 ```
 
 On the Pi, test changes in a throwaway checkout with `--no-services` and other

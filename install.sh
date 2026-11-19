@@ -443,16 +443,18 @@ if [ "$SERVICES" = true ]; then
     sudo systemctl enable --quiet minecraft.service minecraft-manager.service
     sudo systemctl enable --now --quiet minecraft-backup.timer
     sudo systemctl restart minecraft-manager.service
+    sudo ln -sfn "$DIR/mcserver" /usr/local/bin/mcserver
     if systemctl is-active --quiet minecraft; then
         echo "Minecraft is running the previous setup; restart it when nobody is playing:"
-        echo "  sudo systemctl restart minecraft"
+        echo "  mcserver restart"
     fi
 fi
 
 LAN_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
 echo
 if [ "$SERVICES" = true ]; then
-    echo "Done. Start the server with !up in Discord or: sudo systemctl start minecraft"
+    echo "Done. Start the server with !up in Discord or: mcserver start"
+    echo "Run mcserver for status, the console, backups and more."
 else
     echo "Done. Start the server with: server/start.sh"
 fi

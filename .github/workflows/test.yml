@@ -12,8 +12,8 @@ jobs:
         run: uv run --frozen python -m unittest discover -s tests -v
       - name: Shell scripts
         run: |
-          bash -n install.sh backup.sh templates/start.sh
-          shellcheck install.sh backup.sh
+          bash -n install.sh backup.sh mcserver templates/start.sh
+          shellcheck install.sh backup.sh mcserver
       - name: systemd units
         run: |
           for unit in templates/*.service templates/*.timer; do

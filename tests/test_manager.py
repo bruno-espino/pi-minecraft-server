@@ -1,4 +1,9 @@
+from pathlib import Path
+import tempfile
 import unittest
+from unittest import mock
+
+from minecraft_manager import server
 
 from minecraft_manager.config import Config
 from minecraft_manager.idle import IdleTracker
@@ -122,6 +127,30 @@ class ConfigTests(unittest.TestCase):
     def test_password_required(self):
         with self.assertRaises(SystemExit):
             Config.from_env({})
+
+
+class PregenTests(unittest.TestCase):
+    config = Config(rcon_password="secret")
+
+    def check(self, reply):
+        with tempfile.TemporaryDirectory() as tmp:
+            hold = Path(tmp) / ".pregen"
+            hold.touch()
+            rcon = mock.MagicMock()
+            rcon.__enter__.return_value.command.return_value = reply
+            with mock.patch.object(server, "RCONClient", return_value=rcon):
+                return server.pregen_running(self.config, hold), hold.exists()
+
+    def test_running_task_keeps_the_hold(self):
+        self.assertEqual(self.check("[Chunky] Task running for minecraft:overworld. Processed: 10 chunks"),
+                         (True, True))
+
+    def test_finished_task_clears_the_hold(self):
+        self.assertEqual(self.check("[Chunky] No tasks running."), (False, False))
+
+    def test_no_hold_means_no_pregeneration(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertFalse(server.pregen_running(self.config, Path(tmp) / ".pregen"))
 
 
 if __name__ == "__main__":

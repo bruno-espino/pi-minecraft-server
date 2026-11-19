@@ -12,6 +12,8 @@ from .config import SERVICE
 from .rcon import RCONClient, RCONError, strip_formatting
 
 SERVER_DIR = Path(__file__).resolve().parent.parent / "server"
+# Created by `mcserver pregen`; idle shutdown waits while it exists.
+PREGEN_HOLD = SERVER_DIR / ".pregen"
 _address_cache = (0.0, "")
 
 
@@ -62,6 +64,26 @@ def get_players(config):
             return parse_player_list(rcon.command("list"))
     except RCONError:
         return None
+
+
+def pregen_running(config, hold=None):
+    """Whether pregeneration started by `mcserver pregen` is still going.
+
+    Clears the hold file once Chunky reports no tasks, including after a
+    restart interrupted it. Assumes busy while the console does not answer.
+    """
+    hold = hold or PREGEN_HOLD
+    if not hold.exists():
+        return False
+    try:
+        with RCONClient("127.0.0.1", config.rcon_port, config.rcon_password) as rcon:
+            reply = strip_formatting(rcon.command("chunky progress"))
+    except RCONError:
+        return True
+    if "No tasks running" in reply or "Unknown" in reply:
+        hold.unlink(missing_ok=True)
+        return False
+    return True
 
 
 def rcon_ready(config):
