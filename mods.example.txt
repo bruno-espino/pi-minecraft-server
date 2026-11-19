@@ -3,6 +3,7 @@
 # the first install; edit mods.txt (it is not tracked by git) and rerun
 # ./install.sh. It downloads the newest build for the configured Minecraft
 # version plus required dependencies, and stops if a mod has no build for it.
+# The versions are then kept in mods.lock; ./install.sh --update-mods updates them.
 # Client-only mods you list (e.g. sodium) are skipped on the server.
 #
 # install.sh also builds server/client-pack.mrpack for players (shared by the
