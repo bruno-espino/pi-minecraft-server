@@ -11,20 +11,22 @@ bot to start it, automatic shutdown when nobody is playing, and nightly backups.
 
 ## Requirements
 
-- Raspberry Pi OS / Debian / Ubuntu with systemd, `python3` and `python3-venv`
-- Java 25 for Minecraft 26.x (the installer finds it under `/usr/lib/jvm`)
+- A 64-bit Raspberry Pi OS, Debian or Ubuntu with systemd and `python3`
 - Optional: a Discord bot token
+
+The installer adds `python3-venv` with apt if it is missing, and downloads Java
+(Eclipse Temurin, into `java/`) unless a new enough one is already installed.
 
 ## Install
 
 ```bash
 git clone https://github.com/bruno-espino/pi-minecraft-server.git
 cd pi-minecraft-server
-./install.sh --server fabric --version 26.3
+./install.sh
 ```
 
-The installer asks you to accept the Minecraft EULA and for a Discord token
-(leave it empty to run without Discord), shows a summary, and then:
+The first run asks a few questions (Paper or Fabric, memory, accounts, world
+type, Discord) with sensible defaults, shows a summary, and then:
 
 1. writes `.env` (mode 600) with every setting, so later runs keep them
 2. downloads the server jar and the mods or plugins
@@ -39,7 +41,7 @@ Run `./install.sh --help` for all options. Useful ones:
 |---|---|
 | `--server paper\|fabric` | Server software |
 | `--version 26.3` | Minecraft version |
-| `--memory 4096` | Maximum Java heap in MiB |
+| `--memory 4096` | Maximum Java heap in MiB; `auto` (the default) uses half the RAM, up to 8 GiB |
 | `--online-mode false` | Allow players without official accounts (see Security) |
 | `--whitelist on\|off` | Only let listed players join; new installs start with it off |
 | `--world-type normal` | World type for a new world: `normal`, `large-biomes`, `amplified`, `flat`, or a mod's type |
@@ -52,8 +54,13 @@ with `--world-type wover:normal`, whose overworld is the vanilla one, so they
 combine with overworld mods such as Terralith. The installer points this out
 when they are in `mods.txt`.
 
-Everything the installer creates (`.env`, `server/`, `backups/`, `.venv/`) is
-ignored by git, so updating is `git pull && ./install.sh`.
+Options skip their question, and `--yes` skips them all for scripted installs.
+Later runs keep the saved settings and ask nothing new; add `--guided` to go
+through the questions again.
+
+Everything the installer creates (`.env`, `server/`, `backups/`, `java/`,
+`.venv/`) is ignored by git, so updating is `git pull && ./install.sh`. That
+also updates the downloaded Java.
 
 ## Mods and plugins
 

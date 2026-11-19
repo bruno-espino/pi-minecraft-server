@@ -1,16 +1,22 @@
 """Download helpers for install.sh. Standard library only.
 
     python3 -m minecraft_manager.provision java-major VERSION
+    python3 -m minecraft_manager.provision java-install MAJOR TARGET_DIR
     python3 -m minecraft_manager.provision server-jar paper|fabric VERSION SERVER_DIR
     python3 -m minecraft_manager.provision addons paper|fabric VERSION LIST_FILE TARGET_DIR
 """
 
 import hashlib
 import http.client
+import io
 import json
 from pathlib import Path
+import platform
 import re
+import shutil
+import struct
 import sys
+import tarfile
 import time
 import urllib.error
 import urllib.parse
@@ -63,6 +69,97 @@ def java_major(version):
     if not entry:
         raise SystemExit(f"Minecraft {version} is not a known release")
     return fetch_json(entry["url"])["javaVersion"]["majorVersion"]
+
+
+JAVA_ARCHES = {"aarch64": "aarch64", "arm64": "aarch64", "x86_64": "x64", "amd64": "x64"}
+
+
+def java_arch(machine=None, pointer_bits=None):
+    """Adoptium's name for this machine, or None when there is no 64-bit build.
+
+    A 32-bit OS on a 64-bit Pi still reports aarch64 (the kernel is 64-bit),
+    so the size of a pointer in this Python decides.
+    """
+    machine = (machine or platform.machine()).lower()
+    pointer_bits = pointer_bits or struct.calcsize("P") * 8
+    return JAVA_ARCHES.get(machine) if pointer_bits == 64 else None
+
+
+def extract_tar(data, target):
+    """Unpack a .tar.gz into TARGET, refusing members that would land outside it."""
+    target = Path(target)
+    with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as archive:
+        members = archive.getmembers()
+        for member in members:
+            path = (target / member.name).resolve()
+            if not path.is_relative_to(target.resolve()) or not (
+                member.isfile() or member.isdir() or member.issym()
+            ):
+                raise SystemExit(f"unsafe entry in the Java archive: {member.name}")
+            if member.issym():
+                link = (path.parent / member.linkname).resolve()
+                if not link.is_relative_to(target.resolve()):
+                    raise SystemExit(f"unsafe link in the Java archive: {member.name}")
+        if hasattr(tarfile, "data_filter"):  # Python 3.12+, and needed from 3.14
+            archive.extractall(target, members=members, filter="data")
+        else:
+            archive.extractall(target, members=members)
+
+
+def java_install(major, target_dir, lookup=fetch_json, download=fetch):
+    """Install the newest Eclipse Temurin JRE MAJOR under TARGET_DIR and print its java.
+
+    Each release gets its own directory; older ones are removed unless a
+    running process still uses them (the server picks up the new one on restart).
+    """
+    arch = java_arch()
+    if not arch:
+        raise SystemExit(
+            f"there is no Java {major} download for this system ({platform.machine()}, "
+            f"{struct.calcsize('P') * 8}-bit); Minecraft needs a 64-bit OS such as 64-bit Raspberry Pi OS"
+        )
+    assets = lookup(
+        f"https://api.adoptium.net/v3/assets/latest/{int(major)}/hotspot"
+        f"?architecture={arch}&image_type=jre&os=linux&vendor=eclipse"
+    )
+    if not assets:
+        raise SystemExit(f"Adoptium has no Java {major} for {arch}")
+    release, package = assets[0]["release_name"], assets[0]["binary"]["package"]
+    target = Path(target_dir)
+    home = target / f"{release}-jre"
+    java = home / "bin" / "java"
+    if not java.is_file():
+        print(f"Downloading Java {release} ({package['size'] // 1_000_000} MB)...", file=sys.stderr)
+        data = download(package["link"], timeout=600)
+        if hashlib.sha256(data).hexdigest() != package["checksum"]:
+            raise SystemExit(f"checksum mismatch for {package['name']}")
+        target.mkdir(parents=True, exist_ok=True)
+        staging = target / f".{release}.part"
+        shutil.rmtree(staging, ignore_errors=True)
+        staging.mkdir()
+        extract_tar(data, staging)
+        top = [entry for entry in staging.iterdir() if (entry / "bin" / "java").is_file()]
+        if len(top) != 1:
+            raise SystemExit(f"unexpected layout in {package['name']}")
+        top[0].replace(home)
+        shutil.rmtree(staging)
+    busy = running_executables()
+    for old in target.glob("*-jre"):
+        if old != home and not any(exe.is_relative_to(old) for exe in busy):
+            shutil.rmtree(old)
+            print(f"Removed the older Java {old.name.removesuffix('-jre')}", file=sys.stderr)
+    print(java)
+
+
+def running_executables():
+    """Executables of the processes this user can see."""
+    paths = []
+    for exe in Path("/proc").glob("[0-9]*/exe"):
+        try:
+            paths.append(exe.resolve(strict=True))
+        except OSError:
+            pass
+    return paths
 
 
 # --- Server jar -------------------------------------------------------------
@@ -306,12 +403,13 @@ def main(argv):
     sys.stdout.reconfigure(line_buffering=True)
     commands = {
         "java-major": (1, lambda v: print(java_major(v))),
+        "java-install": (2, java_install),
         "server-jar": (3, server_jar),
         "addons": (4, addons),
     }
     if not argv or argv[0] not in commands or len(argv) - 1 != commands[argv[0]][0]:
         raise SystemExit(__doc__)
-    if argv[0] != "java-major" and argv[1] not in JAR_NAMES:
+    if argv[0] not in ("java-major", "java-install") and argv[1] not in JAR_NAMES:
         raise SystemExit("server type must be paper or fabric")
     commands[argv[0]][1](*argv[1:])
 
