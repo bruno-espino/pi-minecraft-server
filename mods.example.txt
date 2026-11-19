@@ -1,0 +1,24 @@
+# Fabric mods for the server, as Modrinth project names (the last part of
+# https://modrinth.com/mod/<name>). install.sh copies this file to mods.txt on
+# the first install; edit mods.txt (it is not tracked by git) and rerun
+# ./install.sh. It downloads the newest build for the configured Minecraft
+# version plus required dependencies, and stops if a mod has no build for it.
+# Client-only mods you list (e.g. sodium) are skipped on the server.
+#
+# install.sh also builds server/client-pack.mrpack for players (shared by the
+# Discord bot's !mods). Mods both sides need are worked out automatically; add
+# "client" after a name to offer it to players as optional, e.g. "jei client"
+# (this also works for mods Modrinth marks as required on clients, like minimaps).
+
+# Performance (server-side only; players don't need these)
+fabric-api
+lithium
+ferrite-core
+krypton
+
+# Tools: spark (/spark profiler) and Chunky (/chunky pregeneration)
+spark
+chunky
+
+# Your gameplay mods go below. Players need the same ones, except mods that are
+# server-only on Modrinth.

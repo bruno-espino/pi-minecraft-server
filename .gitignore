@@ -1,0 +1,11 @@
+# Created by install.sh: secrets, the server, backups and the Python environment
+.env
+server/
+backups/
+.venv/
+# Your own mod and plugin lists (see mods.example.txt and plugins.example.txt)
+/mods.txt
+/plugins.txt
+
+__pycache__/
+*.py[cod]

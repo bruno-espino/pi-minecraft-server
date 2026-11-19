@@ -1,0 +1,10 @@
+[Unit]
+Description=Nightly Minecraft world backup
+
+[Timer]
+OnCalendar=*-*-* 04:30
+RandomizedDelaySec=15min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

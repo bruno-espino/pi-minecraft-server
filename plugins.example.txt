@@ -1,0 +1,7 @@
+# Paper plugins, as Modrinth project names (https://modrinth.com/plugin/<name>).
+# install.sh copies this file to plugins.txt on the first install; edit
+# plugins.txt (not tracked by git) and rerun ./install.sh.
+# Paper already includes the spark profiler.
+
+# Chunky (/chunky pregeneration)
+chunky
