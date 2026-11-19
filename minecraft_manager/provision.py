@@ -3,7 +3,7 @@
     python3 -m minecraft_manager.provision java-major VERSION
     python3 -m minecraft_manager.provision java-install MAJOR TARGET_DIR
     python3 -m minecraft_manager.provision server-jar paper|fabric VERSION SERVER_DIR
-    python3 -m minecraft_manager.provision addons paper|fabric VERSION LIST_FILE TARGET_DIR
+    python3 -m minecraft_manager.provision addons paper|fabric VERSION LIST_FILE TARGET_DIR [--update]
 """
 
 import hashlib
@@ -32,9 +32,12 @@ JAR_NAMES = {"paper": "paper.jar", "fabric": "fabric-server-launch.jar"}
 MODRINTH_LOADERS = {"paper": ["paper", "spigot", "bukkit"], "fabric": ["fabric"]}
 
 
-def fetch(url, timeout=60, attempts=3):
-    """GET a URL, retrying dropped connections; 4xx/5xx responses are not retried."""
-    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+def fetch(url, timeout=60, attempts=3, data=None):
+    """GET (or POST JSON data to) a URL, retrying dropped connections; 4xx/5xx are not retried."""
+    headers = {"User-Agent": USER_AGENT}
+    if data is not None:
+        data, headers["Content-Type"] = json.dumps(data).encode(), "application/json"
+    request = urllib.request.Request(url, data=data, headers=headers)
     for attempt in range(1, attempts + 1):
         try:
             with urllib.request.urlopen(request, timeout=timeout) as response:
@@ -47,8 +50,8 @@ def fetch(url, timeout=60, attempts=3):
             time.sleep(2 * attempt)
 
 
-def fetch_json(url):
-    return json.loads(fetch(url))
+def fetch_json(url, data=None):
+    return json.loads(fetch(url, data=data))
 
 
 def write_verified(data, target, sha256=None, sha512=None):
@@ -224,6 +227,69 @@ def modrinth_version(project, server_type, version):
     return (releases or versions or [None])[0]
 
 
+def read_lock(path, server_type, version):
+    """Pinned Modrinth version ids by project id, if the lock is for this server and version."""
+    try:
+        lock = json.loads(Path(path).read_text())
+    except (OSError, ValueError):
+        return {}
+    if lock.get("server") != server_type or lock.get("minecraft") != version:
+        return {}
+    return lock.get("versions", {})
+
+
+def write_lock(path, resolution, server_type, version):
+    """Record the exact version of every add-on, for the server and the player pack."""
+    nodes = resolution["nodes"]
+    versions = {
+        node_id: nodes[node_id]["record"]["id"]
+        for node_id in sorted(resolution["server"] | resolution["required"] | resolution["optional"])
+        if nodes[node_id]["record"] and "id" in nodes[node_id]["record"]
+    }
+    lock = {"server": server_type, "minecraft": version, "versions": versions}
+    Path(path).write_text(json.dumps(lock, indent=2, sort_keys=True) + "\n")
+
+
+def installed_versions(target, server_dir, lookup_hashes=None):
+    """Version ids of the managed jars and the player pack, found by hash on Modrinth.
+
+    Seeds the first lock of an existing install, so creating it changes nothing.
+    """
+    target, server_dir = Path(target), Path(server_dir)
+    hashes = []
+    manifest = target / MANIFEST
+    if manifest.is_file():
+        for filename in json.loads(manifest.read_text()):
+            if (target / filename).is_file():
+                hashes.append(hashlib.sha512((target / filename).read_bytes()).hexdigest())
+    pack = server_dir / CLIENT_PACK
+    if pack.is_file():
+        with zipfile.ZipFile(pack) as archive:
+            index = json.loads(archive.read("modrinth.index.json"))
+        hashes += [f["hashes"]["sha512"] for f in index.get("files", [])]
+    if not hashes:
+        return {}
+    lookup_hashes = lookup_hashes or (lambda body: fetch_json("https://api.modrinth.com/v2/version_files", body))
+    found = lookup_hashes({"hashes": sorted(set(hashes)), "algorithm": "sha512"})
+    return {record["project_id"]: record["id"] for record in found.values()}
+
+
+def pinned_lookup(pins, fetch_version=None, newest=None):
+    """A resolve_addons lookup that uses the pinned version of a project when there is one."""
+    fetch_version = fetch_version or (lambda i: fetch_json(f"https://api.modrinth.com/v2/version/{i}"))
+    newest = newest or modrinth_version
+
+    def lookup(project_id, server_type, version):
+        if project_id in pins:
+            try:
+                return fetch_version(pins[project_id])
+            except urllib.error.HTTPError:
+                print(f"  pinned version of {project_id} is gone from Modrinth; using the newest")
+        return newest(project_id, server_type, version)
+
+    return lookup
+
+
 def resolve_addons(entries, server_type, version, lookup=None, project_info=None):
     """Resolve listed projects and their required dependencies.
 
@@ -343,12 +409,20 @@ def client_pack(resolution, version, loader):
     return index, summary
 
 
-def addons(server_type, version, list_file, target_dir):
+def addons(server_type, version, list_file, target_dir, *flags):
+    """Install the listed add-ons. Versions stay pinned in the list's .lock file
+    (mods.lock) until --update, a new Minecraft version, or a new project in the list."""
     target = Path(target_dir)
     target.mkdir(parents=True, exist_ok=True)
     entries = read_list(list_file)
-    print(f"Resolving {len(entries)} {server_type} add-ons for {version} from {Path(list_file).name}")
-    resolution = resolve_addons(entries, server_type, version)
+    lock = Path(list_file).with_suffix(".lock")
+    locked = read_lock(lock, server_type, version)
+    if not locked and not lock.exists():
+        locked = installed_versions(target, target.parent)
+    pins = {} if "--update" in flags else locked
+    action = "Updating" if "--update" in flags else "Resolving"
+    print(f"{action} {len(entries)} {server_type} add-ons for {version} from {Path(list_file).name}")
+    resolution = resolve_addons(entries, server_type, version, lookup=pinned_lookup(pins))
     if resolution["problems"]:
         raise SystemExit("Cannot install add-ons:\n  " + "\n  ".join(resolution["problems"]))
     for warning in resolution["warnings"]:
@@ -365,6 +439,8 @@ def addons(server_type, version, list_file, target_dir):
         if not (path.is_file() and hashlib.sha512(path.read_bytes()).hexdigest() == file["hashes"]["sha512"]):
             write_verified(fetch(file["url"], timeout=300), path, sha512=file["hashes"]["sha512"])
         note = "" if record["version_type"] == "release" else f" ({record['version_type']})"
+        if locked and locked.get(node_id) != record.get("id"):
+            note += " (new)" if node_id not in locked else " (updated)"
         print(f"  {title} {record['version_number']}{note}")
         managed[file["filename"]] = {"title": title, "version": record["version_number"]}
 
@@ -380,6 +456,7 @@ def addons(server_type, version, list_file, target_dir):
         print(f"  {nodes[node_id]['info']['title']}: client-only, offered to players")
     if server_type == "fabric":
         write_client_pack(resolution, version, target.parent)
+    write_lock(lock, resolution, server_type, version)
 
 
 def write_client_pack(resolution, version, server_dir):
@@ -407,11 +484,13 @@ def main(argv):
         "server-jar": (3, server_jar),
         "addons": (4, addons),
     }
+    flags = [a for a in argv[1:] if a == "--update"] if argv[:1] == ["addons"] else []
+    argv = [a for a in argv if a not in flags]
     if not argv or argv[0] not in commands or len(argv) - 1 != commands[argv[0]][0]:
         raise SystemExit(__doc__)
     if argv[0] not in ("java-major", "java-install") and argv[1] not in JAR_NAMES:
         raise SystemExit("server type must be paper or fabric")
-    commands[argv[0]][1](*argv[1:])
+    commands[argv[0]][1](*argv[1:], *flags)
 
 
 if __name__ == "__main__":

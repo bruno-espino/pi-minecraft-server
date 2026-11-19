@@ -7,6 +7,8 @@ backups/
 # Your own mod and plugin lists (see mods.example.txt and plugins.example.txt)
 /mods.txt
 /plugins.txt
+/mods.lock
+/plugins.lock
 
 __pycache__/
 *.py[cod]

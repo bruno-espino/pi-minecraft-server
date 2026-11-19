@@ -55,7 +55,7 @@ for item in server.properties ops.json whitelist.json banned-players.json banned
     [ ! -e "$SERVER_DIR/$item" ] || items+=("$item")
 done
 args=(-C "$SERVER_DIR" "${items[@]}")
-for list in mods.txt plugins.txt; do  # local, untracked choices; keep them too
+for list in mods.txt plugins.txt mods.lock plugins.lock; do  # local, untracked choices; keep them too
     [ ! -f "$DIR/$list" ] || args+=(-C "$DIR" "$list")
 done
 tar --exclude='*.jar' -czf "$archive.part" "${args[@]}"
