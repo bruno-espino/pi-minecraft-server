@@ -18,6 +18,8 @@ Usage: ./install.sh [options]
   --rcon-port PORT          Local RCON port (default: 25575)
   --online-mode true|false  Require official Minecraft accounts (default: true)
   --whitelist on|off        Only let listed players join (new installs: off)
+  --world-type TYPE         World type for a new world: normal, large-biomes,
+                            amplified, flat, or a mod's type such as wover:normal
   --new-world               Archive the current world so the next start makes a new one
   --no-services             Skip systemd units, sudo rules and the backup timer
   --accept-eula             Accept https://aka.ms/MinecraftEULA without asking
@@ -34,7 +36,7 @@ fail() { echo "Error: $*" >&2; exit 1; }
 env_value() { [ -f "$DIR/.env" ] && sed -n "s/^$1=//p" "$DIR/.env" | tail -1 || true; }
 ask() { [ "$YES" = true ] && return 0; read -r -p "$1 [y/N] " reply; [[ "$reply" =~ ^[Yy]$ ]]; }
 
-SERVER_TYPE="" VERSION="" MEMORY_MB="" PORT="" RCON_PORT="" ONLINE_MODE="" WHITELIST=""
+SERVER_TYPE="" VERSION="" MEMORY_MB="" PORT="" RCON_PORT="" ONLINE_MODE="" WHITELIST="" WORLD_TYPE=""
 NEW_WORLD=false SERVICES=true ACCEPT_EULA=false YES=false
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -45,6 +47,7 @@ while [ "$#" -gt 0 ]; do
         --rcon-port) RCON_PORT="${2:?}"; shift 2 ;;
         --online-mode) ONLINE_MODE="${2:?}"; shift 2 ;;
         --whitelist) WHITELIST="${2:?}"; shift 2 ;;
+        --world-type) WORLD_TYPE="${2:?}"; shift 2 ;;
         --new-world) NEW_WORLD=true; shift ;;
         --no-services) SERVICES=false; shift ;;
         --accept-eula) ACCEPT_EULA=true; shift ;;
@@ -88,6 +91,11 @@ for p in "$PORT" "$RCON_PORT"; do
     fi
 done
 (( PORT != RCON_PORT )) || fail "the Minecraft and RCON ports must differ"
+case "$WORLD_TYPE" in
+    normal|large-biomes|amplified|flat) WORLD_TYPE="minecraft:${WORLD_TYPE//-/_}" ;;
+esac
+[[ "$WORLD_TYPE" =~ ^(|[a-z0-9_.-]+:[a-z0-9_./-]+)$ ]] ||
+    fail "--world-type must be normal, large-biomes, amplified, flat or namespace:name"
 
 LEVEL=""
 [ ! -f "$SERVER_DIR/server.properties" ] || LEVEL="$(sed -n 's/^level-name=//p' "$SERVER_DIR/server.properties" | tail -1)"
@@ -95,6 +103,16 @@ LEVEL="${LEVEL:-world}"
 [[ "$LEVEL" =~ ^[A-Za-z0-9._][A-Za-z0-9._-]*$ ]] || fail "unsupported level-name: $LEVEL"
 WORLD_EXISTS=false
 [ ! -f "$SERVER_DIR/$LEVEL/level.dat" ] || WORLD_EXISTS=true
+# server.properties stores the world type with an escaped colon (minecraft\:normal).
+CURRENT_WORLD_TYPE=""
+[ ! -f "$SERVER_DIR/server.properties" ] ||
+    CURRENT_WORLD_TYPE="$(sed -n 's/^level-type=//p' "$SERVER_DIR/server.properties" | tail -1 | sed 's/\\:/:/g')"
+CURRENT_WORLD_TYPE="${CURRENT_WORLD_TYPE:-minecraft:normal}"
+if [ -n "$WORLD_TYPE" ] && [ "$WORLD_TYPE" != "$CURRENT_WORLD_TYPE" ] && [ "$WORLD_EXISTS" = true ] &&
+   [ "$NEW_WORLD" = false ]; then
+    fail "the world type only applies when a world is created; add --new-world to start one as $WORLD_TYPE"
+fi
+WORLD_TYPE="${WORLD_TYPE:-$CURRENT_WORLD_TYPE}"
 if [ "$WORLD_EXISTS" = true ] && [ -n "$PREVIOUS_TYPE" ] && [ "$PREVIOUS_TYPE" != "$SERVER_TYPE" ] &&
    [ "$NEW_WORLD" = false ]; then
     fail "the existing world was made by $PREVIOUS_TYPE; pass --new-world to archive it and start fresh"
@@ -142,9 +160,18 @@ cat <<EOF
   Online mode    $ONLINE_MODE
   Discord        $([ -n "$DISCORD_TOKEN" ] && echo enabled || echo disabled)
   New world      $NEW_WORLD$([ "$WORLD_EXISTS" = true ] && [ "$NEW_WORLD" = true ] && echo " (current world is archived to backups/)")
+  World type     $WORLD_TYPE$([ "$WORLD_EXISTS" = true ] && [ "$NEW_WORLD" = false ] && echo " (existing world)")
   systemd        $SERVICES
 
 EOF
+# Some world-generation mods only take effect in a world created with their own
+# type; with the vanilla type they load but keep vanilla terrain.
+if [[ "$WORLD_TYPE" != wover:* ]] && { [ "$WORLD_EXISTS" = false ] || [ "$NEW_WORLD" = true ]; } &&
+   [ -f "$ADDON_LIST" ] && grep -qE '^[[:space:]]*(betterend|betternether)([[:space:]#]|$)' "$ADDON_LIST"; then
+    echo "Note: BetterEnd/BetterNether only generate their terrain in a world created with"
+    echo "      --world-type wover:normal. Rerun with it now; it cannot be changed later."
+    echo
+fi
 ask "Continue?" || fail "cancelled"
 
 umask 077
@@ -181,7 +208,10 @@ fi
 
 set_property() {
     if grep -q "^$1=" "$SERVER_DIR/server.properties"; then
-        sed -i "s|^$1=.*|$1=$2|" "$SERVER_DIR/server.properties"
+        local value="${2//\\/\\\\}"
+        value="${value//&/\\&}"
+        value="${value//|/\\|}"
+        sed -i "s|^$1=.*|$1=$value|" "$SERVER_DIR/server.properties"
     else
         printf '%s=%s\n' "$1" "$2" >> "$SERVER_DIR/server.properties"
     fi
@@ -204,6 +234,7 @@ set_property rcon.port "$RCON_PORT"
 set_property rcon.password "$RCON_PASSWORD"
 set_property broadcast-rcon-to-ops false
 set_property online-mode "$ONLINE_MODE"
+set_property level-type "${WORLD_TYPE//:/\\:}"
 set_property enforce-secure-profile "$ONLINE_MODE"
 chmod 600 "$SERVER_DIR/server.properties"
 echo "eula=true" > "$SERVER_DIR/eula.txt"
