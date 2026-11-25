@@ -153,7 +153,10 @@ class DownsampleTests(unittest.TestCase):
 
 class PrometheusTests(unittest.TestCase):
     def test_units_and_missing_values(self):
-        text = metrics.prometheus({"time": START, "cpu": 25.0, "mem_used": 1024, "tick": 12.5, "players": 3})
+        text = metrics.prometheus(
+            {"time": START, "cpu": 25.0, "mem_used": 1024, "disk_free": 419.4, "tick": 12.5, "players": 3}
+        )
+        self.assertIn("mcserver_disk_free_bytes 450327320986\n", text)
         self.assertIn("mcserver_cpu_ratio 0.25\n", text)
         self.assertIn("mcserver_memory_used_bytes 1073741824\n", text)
         self.assertIn("mcserver_tick_seconds 0.0125\n", text)

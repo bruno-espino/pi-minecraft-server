@@ -238,7 +238,9 @@ def downsample(rows, points=800, interval=INTERVAL_SECONDS):
 
 
 def _number(value):
-    return str(int(value)) if float(value).is_integer() else f"{value:.6g}"
+    if float(value).is_integer() or abs(value) >= 1e6:  # whole bytes rather than 4.50327e+11
+        return str(round(value))
+    return f"{value:.6g}"
 
 
 def prometheus(row):
