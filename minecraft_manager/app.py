@@ -47,10 +47,24 @@ async def watch_idle(config, notify=None):
         await asyncio.sleep(config.check_interval_seconds)
 
 
+def background(config, notify=None):
+    """The manager's loops: idle shutdown, plus monitoring when enabled."""
+    loops = [watch_idle(config, notify)]
+    if config.monitoring:
+        from .metrics import monitor
+
+        loops.append(monitor(config))
+    return loops
+
+
+async def run_without_discord(config):
+    await asyncio.gather(*background(config))
+
+
 def run(config):
     if not config.discord_token:
         log("DISCORD_TOKEN not set; running idle shutdown only")
-        asyncio.run(watch_idle(config))
+        asyncio.run(run_without_discord(config))
         return
     from .bot import create_bot  # discord.py is only needed with a token
 

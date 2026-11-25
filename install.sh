@@ -25,6 +25,8 @@ Run without options for a guided setup; options skip their question.
   --new-world               Archive the current world so the next start makes a new one
   --update-mods             Move mods or plugins to their newest builds (otherwise the
                             versions in mods.lock / plugins.lock are kept)
+  --monitoring on|off       Record CPU, memory, temperature, tick time and players, with
+                            charts on port 8080 (default: on)
   --no-services             Skip systemd units, sudo rules and the backup timer
   --accept-eula             Accept https://aka.ms/MinecraftEULA without asking
   --guided                  Ask about every setting, also when updating
@@ -72,7 +74,7 @@ auto_memory() {
     echo "$mb"
 }
 
-SERVER_TYPE="" VERSION="" MEMORY_MB="" PORT="" RCON_PORT="" ONLINE_MODE="" WHITELIST="" WORLD_TYPE=""
+SERVER_TYPE="" VERSION="" MEMORY_MB="" PORT="" RCON_PORT="" ONLINE_MODE="" WHITELIST="" WORLD_TYPE="" MONITORING=""
 NEW_WORLD=false SERVICES=true ACCEPT_EULA=false YES=false GUIDED=false UPDATE_MODS=()
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -86,6 +88,7 @@ while [ "$#" -gt 0 ]; do
         --world-type) WORLD_TYPE="${2:?}"; shift 2 ;;
         --new-world) NEW_WORLD=true; shift ;;
         --update-mods) UPDATE_MODS=(--update); shift ;;
+        --monitoring) MONITORING="${2:?}"; shift 2 ;;
         --no-services) SERVICES=false; shift ;;
         --accept-eula) ACCEPT_EULA=true; shift ;;
         --guided) GUIDED=true; shift ;;
@@ -118,7 +121,7 @@ fi
 
 # Options override .env, which overrides defaults.
 GIVEN_SERVER_TYPE="$SERVER_TYPE" GIVEN_VERSION="$VERSION" GIVEN_MEMORY="$MEMORY_MB"
-GIVEN_ONLINE_MODE="$ONLINE_MODE" GIVEN_WORLD_TYPE="$WORLD_TYPE"
+GIVEN_ONLINE_MODE="$ONLINE_MODE" GIVEN_WORLD_TYPE="$WORLD_TYPE" GIVEN_MONITORING="$MONITORING"
 PREVIOUS_TYPE="$(env_value SERVER_TYPE)"
 SERVER_TYPE="${SERVER_TYPE:-${PREVIOUS_TYPE:-paper}}"
 VERSION="${VERSION:-$(env_value MINECRAFT_VERSION)}"; VERSION="${VERSION:-26.3}"
@@ -136,6 +139,9 @@ IDLE_TIMEOUT_MINUTES="$(env_value IDLE_TIMEOUT_MINUTES)"
 CHECK_INTERVAL_SECONDS="$(env_value CHECK_INTERVAL_SECONDS)"
 AUTO_SHUTDOWN="$(env_value AUTO_SHUTDOWN)"
 BACKUP_KEEP="$(env_value BACKUP_KEEP)"
+case "$MONITORING" in on) MONITORING=true ;; off) MONITORING=false ;; esac
+MONITORING="${MONITORING:-$(env_value MONITORING)}"; MONITORING="${MONITORING:-true}"
+MONITOR_PORT="$(env_value MONITOR_PORT)"; MONITOR_PORT="${MONITOR_PORT:-8080}"
 CURRENT_WHITELIST=""
 [ ! -f "$SERVER_DIR/server.properties" ] ||
     CURRENT_WHITELIST="$(sed -n 's/^white-list=//p' "$SERVER_DIR/server.properties" | tail -1)"
@@ -174,20 +180,32 @@ if [ "$GUIDED" = true ]; then
         WHITELIST=off
         if yes_no "Only let players you add join (whitelist)?" "$default"; then WHITELIST=on; fi
     fi
+    if [ -z "$GIVEN_MONITORING" ]; then
+        default=Y
+        [ "$MONITORING" = true ] || default=N
+        MONITORING=false
+        if yes_no "Record CPU, memory, temperature and lag, with charts on port $MONITOR_PORT?" "$default"; then
+            MONITORING=true
+        fi
+    fi
 fi
 
 [[ "$SERVER_TYPE" =~ ^(paper|fabric)$ ]] || fail "--server must be paper or fabric"
 [[ "$ONLINE_MODE" =~ ^(true|false)$ ]] || fail "--online-mode must be true or false"
 [[ "$WHITELIST" =~ ^(|on|off)$ ]] || fail "--whitelist must be on or off"
+[[ "$MONITORING" =~ ^(true|false)$ ]] || fail "--monitoring must be on or off"
 if ! [[ "$MEMORY_MB" =~ ^[0-9]+$ ]] || (( MEMORY_MB < 1024 )); then
     fail "--memory must be auto or at least 1024"
 fi
-for p in "$PORT" "$RCON_PORT"; do
+for p in "$PORT" "$RCON_PORT" "$MONITOR_PORT"; do
     if ! [[ "$p" =~ ^[0-9]+$ ]] || (( p < 1024 || p > 65535 )); then
         fail "invalid port: $p"
     fi
 done
 (( PORT != RCON_PORT )) || fail "the Minecraft and RCON ports must differ"
+if [ "$MONITORING" = true ] && { (( MONITOR_PORT == PORT )) || (( MONITOR_PORT == RCON_PORT )); }; then
+    fail "MONITOR_PORT in .env must differ from the Minecraft and RCON ports"
+fi
 
 ADDON_LIST="$DIR/plugins.txt" ADDON_DIR="$SERVER_DIR/plugins"
 [ "$SERVER_TYPE" = paper ] || { ADDON_LIST="$DIR/mods.txt"; ADDON_DIR="$SERVER_DIR/mods"; }
@@ -312,6 +330,7 @@ cat <<EOF
   Online mode    $ONLINE_MODE
   Whitelist      $WHITELIST_LABEL
   Discord        $([ -n "$DISCORD_TOKEN" ] && echo enabled || echo disabled)
+  Monitoring     $([ "$MONITORING" = true ] && echo "on, charts on port $MONITOR_PORT" || echo off)
   New world      $NEW_WORLD$([ "$WORLD_EXISTS" = true ] && [ "$NEW_WORLD" = true ] && echo " (current world is archived to backups/)")
   World type     $WORLD_TYPE$([ "$CREATES_WORLD" = false ] && echo " (existing world)")
   systemd        $SERVICES
@@ -361,6 +380,8 @@ IDLE_TIMEOUT_MINUTES=${IDLE_TIMEOUT_MINUTES:-30}
 CHECK_INTERVAL_SECONDS=${CHECK_INTERVAL_SECONDS:-60}
 AUTO_SHUTDOWN=${AUTO_SHUTDOWN:-true}
 BACKUP_KEEP=${BACKUP_KEEP:-7}
+MONITORING=$MONITORING
+MONITOR_PORT=$MONITOR_PORT
 EOF
 umask 022
 mkdir -p "$SERVER_DIR" "$DIR/backups"
@@ -464,3 +485,6 @@ else
 fi
 echo "Players on your network connect to ${LAN_IP:-the address of this machine}:$PORT; for players"
 echo "elsewhere, forward port $PORT on your router (see the README)."
+if [ "$SERVICES" = true ] && [ "$MONITORING" = true ]; then
+    echo "Monitoring charts: http://${LAN_IP:-localhost}:$MONITOR_PORT (keep this port closed on the router)."
+fi

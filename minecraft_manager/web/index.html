@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Minecraft server monitor</title>
+<link rel="stylesheet" href="uPlot.min.css">
+<style>
+  :root {
+    --bg: #f7f7f5; --panel: #ffffff; --fg: #1d1d1b; --muted: #6b6b66; --line: #e2e2dc; --grid: #ecece6;
+    --blue: #2f6fdb; --orange: #d9822b; --green: #2e9d5b; --red: #d64545; --band: rgba(214, 69, 69, 0.12);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #141413; --panel: #1d1d1b; --fg: #ecece6; --muted: #9a9a92; --line: #2f2f2c; --grid: #2a2a27;
+      --blue: #6b9cf0; --orange: #f0a35e; --green: #5cc48a; --red: #f07070; --band: rgba(240, 112, 112, 0.16);
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding: 20px 16px 40px; }
+  header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 16px; margin-bottom: 16px; }
+  h1 { font-size: 20px; margin: 0; font-weight: 600; }
+  .muted { color: var(--muted); }
+  .ranges { display: flex; gap: 4px; }
+  .ranges button { font: inherit; font-size: 14px; padding: 4px 10px; border: 1px solid var(--line); background: var(--panel); color: var(--fg); border-radius: 6px; cursor: pointer; }
+  .ranges button[aria-pressed="true"] { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin-bottom: 16px; }
+  .tile { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+  .tile .label { font-size: 13px; color: var(--muted); }
+  .tile .value { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .tile .note { font-size: 13px; color: var(--muted); }
+  .warn { color: var(--red); }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 12px 4px; margin-bottom: 12px; }
+  section h2 { font-size: 15px; margin: 0 0 4px; font-weight: 600; }
+  section p { margin: 0 0 6px; font-size: 13px; color: var(--muted); }
+  .chart { width: 100%; }
+  #empty { display: none; padding: 24px; text-align: center; }
+  .u-legend { font-size: 13px; color: var(--fg); }
+  .u-legend .u-marker { border-radius: 2px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <h1 id="label">Minecraft server</h1>
+      <div class="muted" id="updated">Loading…</div>
+    </div>
+    <div class="ranges" role="group" aria-label="Time range">
+      <button data-hours="6">6 h</button>
+      <button data-hours="24">24 h</button>
+      <button data-hours="168">7 d</button>
+      <button data-hours="720">30 d</button>
+    </div>
+  </header>
+  <div class="tiles" id="tiles"></div>
+  <div id="empty" class="muted">No samples yet. The manager records one per minute; check back shortly.</div>
+  <section><h2>Tick time and players</h2><p>Time the server needs per game tick. Above 50 ms the game slows down.</p><div class="chart" id="tick"></div></section>
+  <section><h2>CPU</h2><p>Share of the whole machine.</p><div class="chart" id="cpu"></div></section>
+  <section><h2>Memory</h2><p>In use by the whole machine and by the Minecraft server.</p><div class="chart" id="memory"></div></section>
+  <section><h2>Temperature</h2><p>Shaded where the Raspberry Pi was throttling (heat or power).</p><div class="chart" id="temp"></div></section>
+</main>
+<script src="uPlot.iife.min.js"></script>
+<script>
+"use strict";
+const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const fmt = (value, digits = 0) => value == null ? "–" : value.toFixed(digits);
+let hours = 24, charts = {}, data = null;
+try { hours = Number(localStorage.getItem("hours")) || 24; } catch (e) {}
+
+function shade(field) {  // background bands where data[field] > 0
+  return { hooks: { drawClear: u => {
+    const xs = u.data[0], ys = data && data.series[field];
+    if (!ys) return;
+    const ctx = u.ctx;
+    ctx.save();
+    ctx.fillStyle = css("--band");
+    for (let i = 0; i < xs.length; i++) {
+      if (!(ys[i] > 0)) continue;
+      const x0 = u.valToPos(xs[i], "x", true), x1 = u.valToPos(xs[i + 1] ?? xs[i] + 60, "x", true);
+      ctx.fillRect(x0, u.bbox.top, Math.max(1, x1 - x0), u.bbox.height);
+    }
+    ctx.restore();
+  } } };
+}
+
+function threshold(value) {  // dashed line at the lag threshold
+  return { hooks: { draw: u => {
+    const y = u.valToPos(value, "y", true), ctx = u.ctx;
+    ctx.save();
+    ctx.strokeStyle = css("--red");
+    ctx.setLineDash([6, 4]);
+    ctx.lineWidth = devicePixelRatio;
+    ctx.beginPath();
+    ctx.moveTo(u.bbox.left, y);
+    ctx.lineTo(u.bbox.left + u.bbox.width, y);
+    ctx.stroke();
+    ctx.restore();
+  } } };
+}
+
+function axis(label, side = 3, values, scale = "y") {
+  return { label, side, values, scale, stroke: css("--muted"), labelSize: 18, grid: { stroke: css("--grid"), width: 1 }, ticks: { stroke: css("--grid"), width: 1 } };
+}
+
+function timeAxis() {
+  return { stroke: css("--muted"), grid: { stroke: css("--grid"), width: 1 }, ticks: { stroke: css("--grid"), width: 1 } };
+}
+
+function line(label, color, unit, scale = "y", extra = {}) {
+  return { label, stroke: css(color), width: 1.5, scale, value: (u, v) => v == null ? "–" : `${v.toFixed(unit === "%" || unit === "°C" ? 0 : 1)} ${unit}`, ...extra };
+}
+
+const definitions = {
+  tick: () => ({
+    series: [{}, line("Average", "--blue", "ms"), line("P95", "--orange", "ms"),
+             line("Players", "--green", "", "players", { paths: uPlot.paths.stepped({ align: 1 }), value: (u, v) => v == null ? "–" : String(v) })],
+    scales: { y: { range: (u, min, max) => [0, Math.max(60, (max || 0) * 1.1)] }, players: { range: (u, min, max) => [0, Math.max(4, (max || 0) + 1)] } },
+    axes: [timeAxis(), axis("ms"), axis("players", 1, (u, vals) => vals.map(v => Number.isInteger(v) ? v : ""), "players")],
+    plugins: [threshold(50)],
+    columns: s => [s.tick, s.tick_p95, s.players],
+  }),
+  cpu: () => ({
+    series: [{}, line("Machine", "--blue", "%"), line("Minecraft", "--orange", "%")],
+    scales: { y: { range: [0, 100] } },
+    axes: [timeAxis(), axis("%")],
+    columns: s => [s.cpu, s.server_cpu],
+  }),
+  memory: () => ({
+    series: [{}, line("Machine", "--blue", "GiB"), line("Minecraft", "--orange", "GiB")],
+    scales: { y: { range: (u, min, max) => [0, Math.max(...(data.series.mem_total.filter(v => v != null)), 1024) / 1024] } },
+    axes: [timeAxis(), axis("GiB")],
+    columns: s => [s.mem_used.map(v => v == null ? null : v / 1024), s.server_mem.map(v => v == null ? null : v / 1024)],
+  }),
+  temp: () => ({
+    series: [{}, line("CPU", "--red", "°C")],
+    scales: { y: { range: (u, min, max) => [Math.min(30, min ?? 30), Math.max(90, (max ?? 0) + 5)] } },
+    axes: [timeAxis(), axis("°C")],
+    plugins: [shade("throttled")],
+    columns: s => [s.temp],
+  }),
+};
+
+function size(element) { return { width: element.clientWidth, height: Math.min(240, Math.max(160, element.clientWidth * 0.3)) }; }
+
+function render() {
+  const s = data.series;
+  for (const [id, define] of Object.entries(definitions)) {
+    const element = document.getElementById(id), spec = define(), columns = [s.time, ...spec.columns(s)];
+    if (charts[id]) { charts[id].setData(columns); continue; }
+    charts[id] = new uPlot({ ...size(element), series: spec.series, scales: { x: { time: true }, ...spec.scales },
+      axes: spec.axes, plugins: spec.plugins || [], cursor: { sync: { key: "monitor" } } }, columns, element);
+  }
+}
+
+function tiles(latest) {
+  const flags = latest && latest.throttled > 0
+    ? [latest.throttled & 1 && "under-voltage", latest.throttled & 4 && "throttled", latest.throttled & 8 && "temperature limit", latest.throttled & 2 && "frequency capped"].filter(Boolean)
+    : [];
+  const items = !latest ? [] : [
+    ["Server", latest.up ? "Online" : "Offline", latest.up ? `${latest.players ?? "?"} players` : ""],
+    ["Tick", latest.tick == null ? "–" : `${fmt(latest.tick, 1)} ms`, latest.tick_p95 == null ? "" : `P95 ${fmt(latest.tick_p95, 1)} ms`],
+    ["CPU", `${fmt(latest.cpu)}%`, latest.server_cpu == null ? `load ${fmt(latest.load, 2)}` : `Minecraft ${fmt(latest.server_cpu)}%`],
+    ["Memory", `${fmt(latest.mem_used / 1024, 1)} GiB`, `of ${fmt(latest.mem_total / 1024, 1)} GiB` + (latest.server_mem == null ? "" : `, Minecraft ${fmt(latest.server_mem / 1024, 1)}`)],
+    ["Temperature", latest.temp == null ? "–" : `${fmt(latest.temp)} °C`, flags.length ? `<span class="warn">${flags.join(", ")}</span>` : ""],
+    ["Disk free", latest.disk_free == null ? "–" : `${fmt(latest.disk_free)} GiB`, ""],
+  ];
+  document.getElementById("tiles").innerHTML = items.map(([label, value, note]) =>
+    `<div class="tile"><div class="label">${label}</div><div class="value">${value}</div><div class="note">${note}</div></div>`).join("");
+}
+
+async function load() {
+  try {
+    const response = await fetch(`api/series?hours=${hours}`);
+    data = await response.json();
+  } catch (e) {
+    document.getElementById("updated").textContent = "Cannot reach the manager; retrying every minute.";
+    return;
+  }
+  document.getElementById("label").textContent = data.label;
+  document.title = `${data.label} monitor`;
+  const latest = data.latest;
+  document.getElementById("updated").textContent = latest
+    ? `Updated ${new Date(latest.time * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "No samples yet";
+  document.getElementById("empty").style.display = data.series.time.length ? "none" : "block";
+  tiles(latest);
+  render();
+}
+
+for (const button of document.querySelectorAll(".ranges button")) {
+  button.setAttribute("aria-pressed", String(Number(button.dataset.hours) === hours));
+  button.addEventListener("click", () => {
+    hours = Number(button.dataset.hours);
+    try { localStorage.setItem("hours", String(hours)); } catch (e) {}
+    document.querySelectorAll(".ranges button").forEach(b => b.setAttribute("aria-pressed", String(b === button)));
+    load();
+  });
+}
+new ResizeObserver(() => { for (const [id, chart] of Object.entries(charts)) chart.setSize(size(document.getElementById(id))); })
+  .observe(document.querySelector("main"));
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+  for (const chart of Object.values(charts)) chart.destroy();
+  charts = {};
+  if (data) render();
+});
+load();
+setInterval(load, 60000);
+</script>
+</body>
+</html>

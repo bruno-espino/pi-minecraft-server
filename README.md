@@ -10,6 +10,7 @@ is playing, and nightly backups.
 - Shuts down after 30 minutes without players; starts again after a power cut
 - Nightly backups that skip unchanged worlds and keep the newest seven
 - `mcserver` for status, console, restore, pregeneration and updates
+- Monitoring: charts of CPU, memory, temperature, lag and players, plus `/metrics` for Grafana and co.
 
 ## Requirements
 
@@ -55,6 +56,7 @@ again on a later run. Run `./install.sh --help` for all options. Useful ones:
 | `--world-type normal` | World type for a new world: `normal`, `large-biomes`, `amplified`, `flat`, or a mod's type |
 | `--new-world` | Move the current world to `backups/old-worlds/` and start fresh |
 | `--update-mods` | Move mods or plugins to their newest builds |
+| `--monitoring on\|off` | Record performance and serve charts on port 8080 (default: on) |
 
 The world type is fixed when a world is created, so pick it before the first
 start (or together with `--new-world`). Some world-generation mods need their
@@ -79,6 +81,7 @@ never touches your settings.
 | `mcserver backup`, `backups` | Back up now; list backups |
 | `mcserver restore [BACKUP]` | Restore a backup (default: the newest); the current world moves to `backups/old-worlds/` |
 | `mcserver pregen 3000 [nether\|end]` | Generate terrain ahead of play (see Performance) |
+| `mcserver stats [HOURS]` | Summary of the recorded performance (default: 24 hours) |
 | `mcserver update [--mods]` | Update this project, the server and Java; `--mods` also updates mods |
 
 ## Mods and plugins
@@ -152,6 +155,8 @@ The installer owns `.env` but keeps your values. Besides the options above:
 | `BACKUP_KEEP` | 7 | Number of backups to keep |
 | `NOTIFICATION_CHANNEL_ID` | | Discord channel for shutdown messages |
 | `SERVER_ADDRESS` | | Hostname shown by `!ip` and `!status` |
+| `MONITORING` | true | Record performance and serve the charts |
+| `MONITOR_PORT` | 8080 | Port of the charts and `/metrics` |
 
 Game settings (difficulty, MOTD, view distance) live in `server/server.properties`.
 The installer only manages the port, RCON, online-mode, whitelist and world-type lines there.
@@ -162,12 +167,24 @@ Players on your network connect to the address `mcserver status` shows. For
 others, forward TCP port 25565 on your router to the machine, or use a tunnel
 such as [playit.gg](https://playit.gg) if you can't (for example behind CGNAT).
 
+## Monitoring
+
+Once a minute the manager records CPU, memory, disk, temperature (and Raspberry
+Pi throttling), the server's own CPU and memory, tick time and players. It keeps
+30 days in `metrics/`, about 150 KB a day, and needs no extra software.
+
+- **Charts:** open `http://<the machine's address>:8080` on your network.
+- **Summary:** `mcserver stats` shows peaks and the slowest moments.
+- **Your own tools:** `http://<address>:8080/metrics` has the latest values in
+  the Prometheus format, for Prometheus, Telegraf (`inputs.prometheus`), Grafana
+  Alloy or Netdata.
+
 ## Performance on a Pi 5
 
 - **New terrain is the expensive part.** Exploring ungenerated land causes
   multi-second stalls; pregenerated land does not. Before inviting players, run
   `mcserver pregen 3000` (about 40 minutes); idle shutdown waits for it.
-- **Lag:** `mcserver status` shows the tick time (above 50 ms the game slows
+- **Lag:** `mcserver status` and the monitoring charts show the tick time (above 50 ms the game slows
   down); lowering `simulation-distance` (6 by default) to 4 helps most. Use
   `/spark profiler` in game to find the cause.
 - **Memory:** the server starts with a 1 GiB heap and grows up to `--memory`.
@@ -178,8 +195,8 @@ such as [playit.gg](https://playit.gg) if you can't (for example behind CGNAT).
 
 ## Security
 
-- Forward only the Minecraft port on your router. RCON listens on the machine
-  and should never be forwarded.
+- Forward only the Minecraft port on your router. RCON and the monitoring port
+  should never be forwarded; the charts are read-only and show no player names.
 - With `--online-mode false`, the server doesn't check accounts, so anyone can join
   with any username, including an operator's. Keep the operator list short, or
   use a whitelist or an authentication mod if the server is public.

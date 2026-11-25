@@ -25,6 +25,8 @@ Usage: mcserver COMMAND
                           so exploring doesn't lag. WORLD: overworld (default), nether, end.
                           Idle shutdown waits until it finishes.
   pregen status | stop    Pregeneration progress, or cancel it
+  stats [HOURS]           CPU, memory, temperature, tick time and players over the last
+                          HOURS (default 24), from the monitoring records
   update [--mods]         Update this project, the server and Java; --mods also moves
                           mods/plugins to their newest builds (players then need the new pack)
 EOF
@@ -155,6 +157,9 @@ status() {
     lan="$(hostname -I 2>/dev/null | awk '{print $1}')"
     printf '%-11s %s:%s on your network%s\n' Address "${lan:-?}" "$(env_value MINECRAFT_PORT)" \
         "$([ -z "$(env_value SERVER_ADDRESS)" ] || echo ", $(env_value SERVER_ADDRESS) from outside")"
+    [ "$(env_value MONITORING)" = false ] || ! own_unit ||
+        printf '%-11s http://%s:%s (charts; mcserver stats for a summary)\n' Monitoring "${lan:-localhost}" \
+            "$(env_value MONITOR_PORT)"
     if command -v vcgencmd >/dev/null; then
         local temp throttled
         temp="$(vcgencmd measure_temp | sed 's/temp=//; s/'"'"'C/ °C/')"
@@ -289,5 +294,6 @@ case "$command" in
     backups) list_backups ;;
     restore) restore "$@" ;;
     pregen) pregen "$@" ;;
+    stats) [ "$#" -le 1 ] || fail "usage: mcserver stats [HOURS]"; "$PY" -m minecraft_manager stats "$@" ;;
     *) usage >&2; fail "unknown command: $command" ;;
 esac

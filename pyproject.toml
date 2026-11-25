@@ -4,7 +4,7 @@ version = "2.0.0"
 description = "Discord control and idle shutdown for a Raspberry Pi Minecraft server"
 requires-python = ">=3.11"
 license = "MIT"
-dependencies = ["discord.py>=2.5,<3"]
+dependencies = ["aiohttp>=3.9,<4", "discord.py>=2.5,<3"]
 
 [build-system]
 requires = ["hatchling"]
