@@ -3,6 +3,7 @@
     python -m minecraft_manager             run the manager (systemd runs this)
     python -m minecraft_manager rcon CMD    run one console command, e.g. `rcon list`
     python -m minecraft_manager console     type console commands interactively
+    python -m minecraft_manager stats [H]   summary of the recorded metrics (default: 24 hours)
     python -m minecraft_manager stop [PID]  stop the server cleanly (systemd ExecStop)
 """
 
@@ -88,6 +89,21 @@ def main(argv):
         return
     if argv == ["console"]:
         console(config)
+        return
+    if argv[:1] == ["stats"] and len(argv) <= 2:
+        import time
+
+        from . import metrics
+
+        try:
+            hours = float(argv[1]) if len(argv) == 2 else 24.0
+        except ValueError:
+            raise SystemExit("usage: stats [HOURS]") from None
+        if hours <= 0:
+            raise SystemExit("usage: stats [HOURS]")
+        print(metrics.summary(metrics.Store().read(time.time() - hours * 3600), hours))
+        if not config.monitoring:
+            print("Monitoring is off; enable it with ./install.sh --monitoring on")
         return
     if argv[:1] == ["stop"] and len(argv) <= 2:
         # systemd also runs ExecStop after the server exited by itself; then

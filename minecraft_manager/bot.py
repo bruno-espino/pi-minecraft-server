@@ -7,7 +7,7 @@ import discord
 from discord.ext import commands
 
 from . import server
-from .app import log, watch_idle
+from .app import background, log
 
 STARTUP_TIMEOUT_SECONDS = 300
 
@@ -59,7 +59,7 @@ def create_bot(config):
     background_tasks = []
 
     async def setup_hook():
-        background_tasks.append(asyncio.create_task(watch_idle(config, notify)))
+        background_tasks.extend(asyncio.create_task(loop) for loop in background(config, notify))
         background_tasks.append(asyncio.create_task(presence_loop()))
 
     bot.setup_hook = setup_hook

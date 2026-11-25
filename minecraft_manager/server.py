@@ -66,6 +66,42 @@ def get_players(config):
         return None
 
 
+def main_pid():
+    """The server's process ID while the unit runs, else None."""
+    result = subprocess.run(
+        ["systemctl", "show", "-p", "MainPID", "--value", SERVICE], capture_output=True, text=True, timeout=10
+    )
+    pid = result.stdout.strip()
+    return int(pid) if pid.isdigit() and pid != "0" else None
+
+
+def parse_tick(response):
+    """(average, P95) milliseconds per tick from `tick query` or Paper's `mspt`, or (None, None)."""
+    text = " ".join(strip_formatting(response).split())
+    average = re.search(r"Average time per tick: ([0-9.]+) ?ms", text)
+    if average:
+        p95 = re.search(r"P95: ([0-9.]+) ?ms", text)
+        return float(average.group(1)), float(p95.group(1)) if p95 else None
+    # Paper: "Server tick times (avg/min/max) from last 5s, 10s, 1m: ◴ 1.2/0.4/3.1, 1.3/0.4/5.0, 1.1/0.3/9.8"
+    triples = re.findall(r"([0-9.]+)/([0-9.]+)/([0-9.]+)", text)
+    if triples:
+        return float(triples[-1][0]), None
+    return None, None
+
+
+def server_stats(config):
+    """(players, tick average ms, tick P95 ms) over one RCON connection; None where unknown."""
+    try:
+        with RCONClient("127.0.0.1", config.rcon_port, config.rcon_password, timeout=5) as rcon:
+            players = parse_player_list(rcon.command("list"))
+            tick = parse_tick(rcon.command("tick query"))
+            if tick == (None, None) and config.server_type == "paper":
+                tick = parse_tick(rcon.command("mspt"))
+    except RCONError:
+        return None, None, None
+    return (players.count if players else None), *tick
+
+
 def pregen_running(config, hold=None):
     """Whether pregeneration started by `mcserver pregen` is still going.
 

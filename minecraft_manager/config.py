@@ -23,6 +23,8 @@ class Config:
     idle_timeout_minutes: int = 30
     check_interval_seconds: int = 60
     auto_shutdown: bool = True
+    monitoring: bool = True
+    monitor_port: int = 8080
 
     @property
     def server_label(self):
@@ -47,4 +49,6 @@ class Config:
             idle_timeout_minutes=int(env.get("IDLE_TIMEOUT_MINUTES", 30)),
             check_interval_seconds=int(env.get("CHECK_INTERVAL_SECONDS", 60)),
             auto_shutdown=_flag(env.get("AUTO_SHUTDOWN", "true")),
+            monitoring=_flag(env.get("MONITORING", "true")),
+            monitor_port=int(env.get("MONITOR_PORT", 8080)),
         )
