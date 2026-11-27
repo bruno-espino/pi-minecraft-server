@@ -8,7 +8,7 @@ from minecraft_manager import server
 
 from minecraft_manager.config import Config
 from minecraft_manager.idle import IdleTracker
-from minecraft_manager.server import Players, format_mods_message, parse_player_list
+from minecraft_manager.server import Players, format_mods_messages, parse_player_list
 
 MINUTE = 60
 
@@ -85,24 +85,28 @@ class ModsMessageTests(unittest.TestCase):
         return Config.from_env({"RCON_PASSWORD": "x", "SERVER_TYPE": server_type, "MINECRAFT_VERSION": "26.3"})
 
     def test_paper_needs_no_mods(self):
-        self.assertIn("needs no mods", format_mods_message(self.config("paper"), None))
+        self.assertIn("needs no mods", format_mods_messages(self.config("paper"), None)[0])
 
     def test_fabric_lists_mods_with_links(self):
-        text = format_mods_message(self.config("fabric"), self.SUMMARY)
+        (text,) = format_mods_messages(self.config("fabric"), self.SUMMARY)
         self.assertIn("**Required:** [Fabric API](<https://modrinth.com/mod/fabric-api>)", text)
         self.assertIn("**Optional:** none", text)
         self.assertIn("Fabric Loader 0.20.1", text)
 
-    def test_long_lists_drop_links_and_fit_discord(self):
-        many = dict(self.SUMMARY, required=[
-            {"title": f"Mod {n}", "url": f"https://modrinth.com/mod/mod-{n}", "version": "1"} for n in range(60)
-        ])
-        text = format_mods_message(self.config("fabric"), many)
-        self.assertLessEqual(len(text), 1900)
-        self.assertNotIn("https://", text.split("**Required:**")[1])
+    def test_long_lists_continue_in_more_messages_with_links(self):
+        mods = [{"title": f"Mod {n}", "url": f"https://modrinth.com/mod/mod-{n}", "version": "1"} for n in range(60)]
+        many = dict(self.SUMMARY, required=mods, optional=mods[:3])
+        messages = format_mods_messages(self.config("fabric"), many)
+        self.assertGreater(len(messages), 1)
+        self.assertTrue(all(len(m) <= 1900 for m in messages))
+        text = "\n".join(messages)
+        for mod in mods:
+            self.assertEqual(text.count(f"[{mod['title']}](<{mod['url']}>)"), 2 if mod in mods[:3] else 1)
+        self.assertIn("**Required (continued):**", text)
+        self.assertIn("**Optional:** [Mod 0]", text)
 
     def test_missing_summary(self):
-        self.assertIn("rerun ./install.sh", format_mods_message(self.config("fabric"), None))
+        self.assertIn("rerun ./install.sh", format_mods_messages(self.config("fabric"), None)[0])
 
 
 class ConfigTests(unittest.TestCase):

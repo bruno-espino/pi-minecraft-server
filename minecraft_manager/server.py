@@ -159,29 +159,39 @@ def client_mods():
     return summary, pack if pack.is_file() else None
 
 
-def format_mods_message(config, summary, limit=1900):
-    """Discord text explaining what players install; stays under Discord's 2000 characters."""
+def format_mods_messages(config, summary, limit=1900):
+    """Discord messages explaining what players install, each under Discord's 2000 characters.
+
+    Long mod lists continue in further messages instead of losing their links.
+    """
     if config.server_type != "fabric":
-        return f"**{config.server_label}** needs no mods: a normal Minecraft {config.minecraft_version} client works."
+        return [f"**{config.server_label}** needs no mods: a normal Minecraft {config.minecraft_version} client works."]
     if not summary:
-        return "The mod list isn't available yet; ask the admin to rerun ./install.sh."
+        return ["The mod list isn't available yet; ask the admin to rerun ./install.sh."]
 
-    def names(group):
-        return ", ".join(f"[{m['title']}](<{m['url']}>)" for m in summary[group]) or "none"
-
-    text = (
+    messages = [
         f"**Mods for {config.server_label}**\n"
         "Easiest: import the attached pack in the **Modrinth App** or **Prism Launcher** "
         "(Add instance → Import); it installs Fabric and the exact versions.\n"
-        f"Manual install: Fabric Loader {summary['loader']} for Minecraft {summary['minecraft']}, then:\n"
-        f"**Required:** {names('required')}\n"
-        f"**Optional:** {names('optional')}"
-    )
-    if len(text) > limit:  # drop links before dropping mods
-        def plain(group):
-            return ", ".join(m["title"] for m in summary[group]) or "none"
-        text = text.split("**Required:**")[0] + f"**Required:** {plain('required')}\n**Optional:** {plain('optional')}"
-    return text[:limit]
+        f"Manual install: Fabric Loader {summary['loader']} for Minecraft {summary['minecraft']}, then:"
+    ]
+    for group, label in (("required", "Required"), ("optional", "Optional")):
+        names = [f"[{m['title']}](<{m['url']}>)" for m in summary[group]] or ["none"]
+        line = f"**{label}:** {names[0]}"
+        for name in names[1:]:
+            if len(line) + 2 + len(name) > limit:
+                messages, line = _append(messages, line, limit), f"**{label} (continued):** {name}"
+            else:
+                line += f", {name}"
+        messages = _append(messages, line, limit)
+    return [message[:limit] for message in messages]
+
+
+def _append(messages, line, limit):
+    """Add a line to the last message, or start a new message when it would not fit."""
+    if len(messages[-1]) + 1 + len(line) <= limit:
+        return messages[:-1] + [messages[-1] + "\n" + line]
+    return messages + [line]
 
 
 def public_address(config):
