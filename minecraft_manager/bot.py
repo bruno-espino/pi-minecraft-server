@@ -118,15 +118,17 @@ def create_bot(config):
     @bot.command(name="mods")
     async def mods(ctx):
         summary, pack = server.client_mods()
-        text = server.format_mods_message(config, summary)
+        first, *rest = server.format_mods_messages(config, summary)
         if config.server_type != "fabric" or not pack:
+            await ctx.send(first)
+        else:
+            filename = f"minecraft-{config.minecraft_version}-mods.mrpack"
+            try:
+                await ctx.send(first, file=discord.File(pack, filename=filename))
+            except discord.Forbidden:
+                await ctx.send(first + "\n_(I need the **Attach Files** permission in this channel to share the pack.)_")
+        for text in rest:
             await ctx.send(text)
-            return
-        filename = f"minecraft-{config.minecraft_version}-mods.mrpack"
-        try:
-            await ctx.send(text, file=discord.File(pack, filename=filename))
-        except discord.Forbidden:
-            await ctx.send(text + "\n_(I need the **Attach Files** permission in this channel to share the pack.)_")
 
     @bot.command(name="help")
     async def help_command(ctx):
